@@ -316,6 +316,7 @@ def project_fields(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         name = field.get("name")
         if not name:
             continue
+        name = canonical_project_field_name(name)
         if "text" in node:
             fields[name] = node.get("text")
         elif "number" in node:
@@ -327,6 +328,19 @@ def project_fields(nodes: list[dict[str, Any]]) -> dict[str, Any]:
         elif "date" in node:
             fields[name] = node.get("date")
     return fields
+
+
+def canonical_project_field_name(name: str) -> str:
+    canonical = {
+        "contract readiness": "Contract Readiness",
+        "contract required": "Contract Required",
+        "epic": "Epic",
+        "implementation target": "Implementation Target",
+        "sprint": "Sprint",
+        "status": "Status",
+        "story point": "Story Point",
+    }
+    return canonical.get(name.strip().lower(), name)
 
 
 def decode_story(row: sqlite3.Row | None) -> dict[str, Any] | None:
