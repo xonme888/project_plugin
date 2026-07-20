@@ -66,6 +66,7 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 - `loaring_find_story`: 요구사항, Story map, API catalog 캐시 검색
 - `loaring_get_contract`: Story 또는 requirement에 연결된 API 계약 메타데이터 조회
 - `loaring_validate_contract_readiness`: 구현 착수 가능한 full API 계약 연결 여부 점검
+- `loaring_infer_project_fields`: Story/API 문서 기준으로 `Contract Required`, `Contract Readiness`, `Implementation Target` 권장값 계산
 - `loaring_sync_stories`: GitHub Story Issue를 sqlite에 동기화
 - `loaring_sync_project`: GitHub Project 필드값을 sqlite에 동기화
 - `loaring_sync_github`: Story Issue와 Project 필드값을 함께 동기화

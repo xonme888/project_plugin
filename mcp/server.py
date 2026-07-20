@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from loaring_ops.product_sync import (  # noqa: E402
     find_story,
     get_contract,
+    infer_project_fields,
     sync_product,
     validate_contract_readiness,
 )
@@ -73,6 +74,19 @@ TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "storyIssue": {"type": "integer"},
                 "requirementId": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "loaring_infer_project_fields": {
+        "description": "Infer Contract Required, Contract Readiness, and Implementation Target from cached product docs and Story metadata.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "requirementId": {"type": "string"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
             },
             "additionalProperties": False,
         },
@@ -211,6 +225,12 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
         "loaring_validate_contract_readiness": lambda args: validate_contract_readiness(
             story_issue=args.get("storyIssue"),
             requirement_id=args.get("requirementId"),
+        ),
+        "loaring_infer_project_fields": lambda args: infer_project_fields(
+            story_issue=args.get("storyIssue"),
+            requirement_id=args.get("requirementId"),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
         ),
         "loaring_sync_stories": lambda args: sync_stories(
             repo=args.get("repo"),

@@ -1,6 +1,6 @@
 ---
 name: story-intake
-description: "Create or refine LoaRing product Story issues and backlog entries. Use for Story scope, acceptance criteria, Epic, Sprint, Story Point, assignees, Contract Required, and GitHub Project readiness without creating Task or Epic issues."
+description: "Create or refine LoaRing product Story issues and backlog entries. Use for Story scope, acceptance criteria, Epic, Sprint, Story Point, assignees, contract fields, implementation target, and GitHub Project readiness without creating Task or Epic issues."
 ---
 
 # Story Intake
@@ -25,6 +25,7 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 - `loaring_sync_github` to refresh Story Issues and Project fields
 - `loaring_find_story` and `loaring_find_cached_stories` to check duplicate or related value
 - `loaring_get_story` to inspect an existing Story and Project fields
+- `loaring_infer_project_fields` to check `Contract Required`, `Contract Readiness`, and `Implementation Target`
 
 The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
 
@@ -36,7 +37,7 @@ The local sqlite cache is not source of truth. Treat it as a read-through cache 
 - Provider / consumer / QA checklist, kept as short responsibility-level checks, with `해당 없음` when a role has no work
 - Done criteria, written as user-observable outcomes
 - Open questions or `없음`
-- Epic, Story Point, Contract Required, Sprint when known
+- Epic, Story Point, Contract Required, Contract Readiness, Implementation Target, Sprint when known
 - GitHub assignees for owner roles
 
 ## Scope Level
@@ -63,7 +64,7 @@ Default checklist size:
 2. Check existing GitHub Story Issues and Project fields when available.
 3. Draft with `user-story-template.v1.yml`.
 4. If the Story should be created in GitHub, map the draft to `.github/ISSUE_TEMPLATE/user-story.yml`.
-5. Use only Project fields: `Epic`, `Status`, `Sprint`, `Story Point`, `Contract Required`.
+5. Use only Project fields: `Epic`, `Status`, `Sprint`, `Story Point`, `Contract Required`, `Contract Readiness`, `Implementation Target`.
 6. Keep owner assignment in GitHub assignees, not custom Project fields.
 7. If API work is needed, hand off to `api-contract`.
 8. If the Story draft needs detailed backend, frontend, or QA execution steps, hand off to `implementation-brief`.

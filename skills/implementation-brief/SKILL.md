@@ -12,7 +12,7 @@ Use this skill to turn approved product material into implementation instruction
 Read from `loaring-story/loaring-product@develop` unless the user gives another repo/ref:
 
 - GitHub Story Issue
-- Project fields: `Epic`, `Status`, `Sprint`, `Story Point`, `Contract Required`
+- Project fields: `Epic`, `Status`, `Sprint`, `Story Point`, `Contract Required`, `Contract Readiness`, `Implementation Target`
 - `docs/requirements/traceability.yml`
 - related `docs/api/*.api-spec.json`
 - `docs/contracts/*.yml` when errors, naming, or envelope rules matter
@@ -26,6 +26,7 @@ When the LoaRing Product Ops MCP tools are available, start with:
 - `loaring_get_story` to inspect Story body, assignees, and Project fields
 - `loaring_validate_contract_readiness` before producing provider or consumer briefs for API work
 - `loaring_get_contract` to retrieve linked API contract metadata
+- `loaring_infer_project_fields` to verify contract fields and implementation target
 
 Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
 

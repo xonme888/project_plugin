@@ -8,7 +8,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
-from .config import PRODUCT_PATHS, repo_name, repo_ref
+from .config import PRODUCT_PATHS, project_number, repo_name, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import fetch_file
 
@@ -208,6 +208,159 @@ def validate_contract_readiness(story_issue: int | None = None, requirement_id: 
         "status": "ready" if ready else "blocked",
         "issues": issues,
         "contract": contract,
+    }
+
+
+def infer_project_fields(
+    story_issue: int | None = None,
+    requirement_id: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+) -> dict[str, Any]:
+    """Infer project field values from cached product docs and Story metadata."""
+    if story_issue is None and requirement_id is None:
+        raise ValueError("storyIssue or requirementId is required")
+
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    conn = connect()
+    init_db(conn)
+
+    contract = get_contract(story_issue=story_issue, requirement_id=requirement_id)
+    story = latest_story(conn, selected_repo, story_issue)
+    project_fields = latest_project_fields(conn, selected_repo, selected_project, story_issue)
+
+    contract_required = infer_contract_required(contract, story)
+    contract_readiness = infer_contract_readiness(contract_required, contract)
+    implementation_target = infer_implementation_target(contract_required, contract, story)
+    recommended = {
+        "Contract Required": contract_required,
+        "Contract Readiness": contract_readiness,
+        "Implementation Target": implementation_target,
+    }
+    mismatches = [
+        {"field": key, "current": project_fields.get(key), "recommended": value}
+        for key, value in recommended.items()
+        if project_fields.get(key) not in {None, "", value}
+    ]
+    return {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "storyIssue": story_issue,
+        "requirementId": requirement_id,
+        "recommendedFields": recommended,
+        "currentProjectFields": project_fields,
+        "mismatches": mismatches,
+        "evidence": {
+            "story": minimal_story(story),
+            "requirements": contract["requirements"],
+            "apiSpecs": contract["apiSpecs"],
+        },
+    }
+
+
+def latest_story(conn: sqlite3.Connection, repo: str, story_issue: int | None) -> dict[str, Any] | None:
+    if story_issue is None:
+        return None
+    row = conn.execute(
+        """
+        SELECT * FROM stories
+        WHERE repo = ? AND issue_number = ?
+        ORDER BY synced_at DESC
+        LIMIT 1
+        """,
+        (repo, story_issue),
+    ).fetchone()
+    if row is None:
+        return None
+    story = dict(row)
+    story["labels"] = json.loads(story.pop("labels_json") or "[]")
+    story["assignees"] = json.loads(story.pop("assignees_json") or "[]")
+    return story
+
+
+def latest_project_fields(
+    conn: sqlite3.Connection,
+    repo: str,
+    selected_project: int,
+    story_issue: int | None,
+) -> dict[str, Any]:
+    if story_issue is None:
+        return {}
+    row = conn.execute(
+        """
+        SELECT fields_json FROM project_items
+        WHERE repo = ? AND project_number = ? AND issue_number = ?
+        ORDER BY synced_at DESC
+        LIMIT 1
+        """,
+        (repo, selected_project, story_issue),
+    ).fetchone()
+    if row is None:
+        return {}
+    return json.loads(row["fields_json"] or "{}")
+
+
+def infer_contract_required(contract: dict[str, Any], story: dict[str, Any] | None) -> str:
+    if contract["apiSpecs"]:
+        return "Yes"
+    text = story_text(story)
+    if re.search(r"Contract Required\s*\n\s*Yes", text, flags=re.IGNORECASE):
+        return "Yes"
+    if re.search(r"API\s*명세\s*\n\s*docs/api/", text, flags=re.IGNORECASE):
+        return "Yes"
+    if any(keyword in text for keyword in ["API 계약", "API 연동", "응답", "요청"]):
+        return "Yes"
+    return "No"
+
+
+def infer_contract_readiness(contract_required: str, contract: dict[str, Any]) -> str:
+    if contract_required == "No":
+        return "Not Required"
+    specs = contract["apiSpecs"]
+    if not specs:
+        return "Missing"
+    if any(not spec.get("endpoints") or not spec.get("lifecycle") for spec in specs):
+        return "Blocked"
+    lifecycles = {spec.get("lifecycle") for spec in specs}
+    if lifecycles <= {"accepted"}:
+        return "Ready"
+    if lifecycles & {"draft", "review"}:
+        return "Draft"
+    return "Blocked"
+
+
+def infer_implementation_target(
+    contract_required: str,
+    contract: dict[str, Any],
+    story: dict[str, Any] | None,
+) -> str:
+    text = story_text(story)
+    if "요구사항 정리" in text or "requirements clarification" in text.lower():
+        return "Product"
+    if contract_required == "Yes" or contract["apiSpecs"]:
+        return "Backend+Frontend"
+    if "QA" in text and "Backend" not in text and "Frontend" not in text:
+        return "QA"
+    return "Product"
+
+
+def story_text(story: dict[str, Any] | None) -> str:
+    if not story:
+        return ""
+    return f"{story.get('title') or ''}\n{story.get('body') or ''}"
+
+
+def minimal_story(story: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not story:
+        return None
+    return {
+        "issueNumber": story.get("issue_number"),
+        "title": story.get("title"),
+        "state": story.get("state"),
+        "url": story.get("url"),
+        "labels": story.get("labels"),
+        "assignees": story.get("assignees"),
     }
 
 
