@@ -145,6 +145,10 @@ TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "sync": {"type": "boolean"},
                 "includeBodies": {"type": "boolean"},
+                "issueNumbers": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                },
             },
             "additionalProperties": False,
         },
@@ -235,6 +239,7 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
         "loaring_migration_dry_run": lambda args: migration_dry_run(
             sync=bool(args.get("sync", True)),
             include_bodies=bool(args.get("includeBodies")),
+            issue_numbers=args.get("issueNumbers"),
         ),
     }
     if name not in handlers:

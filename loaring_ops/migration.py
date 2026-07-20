@@ -12,7 +12,11 @@ from .github_sync import sync_stories
 from .product_sync import sync_product
 
 
-def migration_dry_run(sync: bool = True, include_bodies: bool = False) -> dict[str, Any]:
+def migration_dry_run(
+    sync: bool = True,
+    include_bodies: bool = False,
+    issue_numbers: list[int] | None = None,
+) -> dict[str, Any]:
     if sync:
         product_sync = sync_product()
         story_sync = sync_stories(include_legacy=True)
@@ -35,7 +39,12 @@ def migration_dry_run(sync: bool = True, include_bodies: bool = False) -> dict[s
     ).fetchall()
 
     primary_stories = [decode_story_row(row) for row in primary_rows]
-    legacy_stories = [decode_story_row(row) for row in legacy_rows]
+    selected_issue_numbers = set(issue_numbers or [])
+    legacy_stories = [
+        decode_story_row(row)
+        for row in legacy_rows
+        if not selected_issue_numbers or int(row["issue_number"]) in selected_issue_numbers
+    ]
     traceability = load_traceability()
     catalog = load_catalog()
 
@@ -87,6 +96,7 @@ def migration_dry_run(sync: bool = True, include_bodies: bool = False) -> dict[s
         "summary": {
             "primaryStoryCount": len(primary_stories),
             "legacyStoryCount": len(legacy_stories),
+            "selectedIssues": sorted(selected_issue_numbers),
             "createInProduct": sum(1 for item in items if item["action"] == "create-in-product"),
             "alreadyMigrated": sum(1 for item in items if item["action"] == "already-migrated"),
         },

@@ -18,8 +18,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--no-sync", action="store_true", help="Use existing sqlite cache without fetching GitHub.")
     parser.add_argument("--include-bodies", action="store_true", help="Include full legacy issue bodies in the JSON report.")
+    parser.add_argument("--issue", action="append", type=int, dest="issues", help="Legacy issue number to include. Repeatable.")
     args = parser.parse_args()
-    result = migration_dry_run(sync=not args.no_sync, include_bodies=args.include_bodies)
+    result = migration_dry_run(
+        sync=not args.no_sync,
+        include_bodies=args.include_bodies,
+        issue_numbers=args.issues,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
