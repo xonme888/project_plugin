@@ -28,6 +28,8 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 - `loaring_find_cached_stories` to search cached GitHub Story Issues
 - `loaring_get_story` to inspect Story body and Project fields
 - `loaring_get_contract` to inspect linked contract metadata
+- `loaring_contract_gap_report` to summarize existing contract blockers before recommending new work
+- `loaring_sprint_report` to understand Sprint readiness and assignment pressure when the user asks about sequencing
 
 The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
 
@@ -60,6 +62,8 @@ The local sqlite cache is not source of truth. Treat it as a read-through cache 
 5. Read related API specs and shared contract files when API impact exists.
 6. Produce a requirement-analysis draft using the versioned template shape.
 7. Recommend one next action: Story creation, Story refinement, contract question, PM decision request, implementation brief, or hold.
+
+When recommending implementation start, check `Contract Required`, `Contract Readiness`, and `Implementation Target`. Do not recommend backend/frontend implementation while required readiness is `Missing`, `Draft`, or `Blocked`.
 
 ## External Actions
 

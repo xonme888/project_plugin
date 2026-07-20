@@ -26,10 +26,22 @@ from loaring_ops.github_sync import (  # noqa: E402
     sync_project,
     sync_stories,
 )
+from loaring_ops.github_project import (  # noqa: E402
+    sync_contract_readiness_options,
+    update_project_fields,
+)
 from loaring_ops.migration import migration_dry_run  # noqa: E402
 from loaring_ops.workflow import (  # noqa: E402
+    apply_workflow_transition,
+    contract_gap_report,
+    create_api_contract_issue_comment,
+    create_work_branch,
+    link_pr_to_project,
     plan_story_work,
+    prepare_pr,
     prepare_branch,
+    sprint_report,
+    validate_branch_name,
     validate_workflow,
 )
 
@@ -212,6 +224,163 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "loaring_update_project_fields": {
+        "description": "Plan or apply inferred Story field updates to GitHub Project #7. Writes require apply=true and confirm=true.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "fields": {"type": "object", "additionalProperties": {"type": "string"}},
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_sync_contract_readiness_options": {
+        "description": "Check or rewrite the Project Contract Readiness options to the LoaRing standard values.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "loaring_apply_workflow_transition": {
+        "description": "Plan or apply a Story workflow Status transition with contract-readiness gates.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "transition": {
+                    "type": "string",
+                    "description": "start-contract, start-product, start-backend, start-frontend, request-review, qa-pass, complete, or block.",
+                },
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "transition"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_create_work_branch": {
+        "description": "Plan or run git switch -c for a Story target branch in the current implementation repo.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "product, contract, backend, frontend, fix, docs, or chore."},
+                "slug": {"type": "string"},
+                "cwd": {"type": "string"},
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "target"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_validate_branch_name": {
+        "description": "Validate that the current or provided branch name matches the Story/target branch rule.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "product, contract, backend, frontend, fix, docs, or chore."},
+                "branch": {"type": "string"},
+                "slug": {"type": "string"},
+                "cwd": {"type": "string"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "target"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_prepare_pr": {
+        "description": "Create a PR title/body draft from Story, target, contract readiness, and implementation target.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "product, contract, backend, frontend, fix, docs, or chore."},
+                "branch": {"type": "string"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "target"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_sprint_report": {
+        "description": "Summarize Sprint Stories by Status, Contract Readiness, Implementation Target, and blockers.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+                "sprint": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "loaring_contract_gap_report": {
+        "description": "List Stories whose API contract is required but Missing, Draft, or Blocked.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+                "sprint": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "loaring_create_api_contract_issue_comment": {
+        "description": "Generate or post a standardized [계약 질문] or [계약 결정] Issue comment body.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "kind": {"type": "string", "description": "question or decision."},
+                "question": {"type": "string"},
+                "decision": {"type": "string"},
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "kind"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_link_pr_to_project": {
+        "description": "Check PR Story linkage and optionally move the linked Story to In Request.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "prNumber": {"type": "integer"},
+                "storyIssue": {"type": "integer"},
+                "body": {"type": "string"},
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "PR and Story repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["prNumber"],
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -322,6 +491,83 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
             repo=args.get("repo"),
             number=args.get("projectNumber"),
             sprint=args.get("sprint"),
+        ),
+        "loaring_update_project_fields": lambda args: update_project_fields(
+            story_issue=int(args["storyIssue"]),
+            fields=args.get("fields"),
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_sync_contract_readiness_options": lambda args: sync_contract_readiness_options(
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_apply_workflow_transition": lambda args: apply_workflow_transition(
+            story_issue=int(args["storyIssue"]),
+            transition=args["transition"],
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_create_work_branch": lambda args: create_work_branch(
+            story_issue=int(args["storyIssue"]),
+            target=args["target"],
+            slug=args.get("slug"),
+            cwd=args.get("cwd"),
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_validate_branch_name": lambda args: validate_branch_name(
+            story_issue=int(args["storyIssue"]),
+            target=args["target"],
+            branch=args.get("branch"),
+            slug=args.get("slug"),
+            cwd=args.get("cwd"),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_prepare_pr": lambda args: prepare_pr(
+            story_issue=int(args["storyIssue"]),
+            target=args["target"],
+            branch=args.get("branch"),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_sprint_report": lambda args: sprint_report(
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+            sprint=args.get("sprint"),
+        ),
+        "loaring_contract_gap_report": lambda args: contract_gap_report(
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+            sprint=args.get("sprint"),
+        ),
+        "loaring_create_api_contract_issue_comment": lambda args: create_api_contract_issue_comment(
+            story_issue=int(args["storyIssue"]),
+            kind=args["kind"],
+            question=args.get("question"),
+            decision=args.get("decision"),
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_link_pr_to_project": lambda args: link_pr_to_project(
+            pr_number=int(args["prNumber"]),
+            story_issue=args.get("storyIssue"),
+            body=args.get("body"),
+            apply=bool(args.get("apply")),
+            confirm=bool(args.get("confirm")),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
         ),
     }
     if name not in handlers:

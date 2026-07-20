@@ -31,6 +31,9 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 - `loaring_sync_product` to refresh the local sqlite cache from `loaring-product`
 - `loaring_get_contract` to inspect linked API contract metadata
 - `loaring_validate_contract_readiness` to check whether implementation can start
+- `loaring_contract_gap_report` to find Stories that still need contract work
+- `loaring_create_api_contract_issue_comment` to draft or, with explicit approval, post `[계약 질문]` and `[계약 결정]` comments
+- `loaring_apply_workflow_transition` to move approved contract work to `In Progress` without bypassing readiness gates
 
 The local sqlite cache is not source of truth. It may store snapshots, indexes, and drafts, but accepted contracts must live in `loaring-product`.
 
@@ -100,6 +103,7 @@ Change type values are `additive`, `behavioral`, `breaking`, and `unknown`.
 7. Move unresolved questions to `[계약 질문]`; record accepted outcomes as `[계약 결정]`.
 8. Require counterpart review: provider author needs consumer approval, consumer author needs provider approval, external author needs both.
 9. For breaking changes, include a compatibility plan before merge.
+10. After a full spec is accepted, use `loaring_infer_project_fields` and approved `loaring_update_project_fields` to align Project readiness.
 
 ## Output Guardrails
 

@@ -5,11 +5,26 @@ from __future__ import annotations
 import base64
 import json
 import subprocess
+import tempfile
+from pathlib import Path
 
 
 def gh_api(path: str) -> dict:
     result = subprocess.run(
         ["gh", "api", path],
+        capture_output=True,
+        text=True,
+    )
+    check_result(result)
+    return json.loads(result.stdout)
+
+
+def gh_api_post(path: str, fields: dict[str, str]) -> dict:
+    args = ["gh", "api", "-X", "POST", path]
+    for key, value in fields.items():
+        args.extend(["-f", f"{key}={value}"])
+    result = subprocess.run(
+        args,
         capture_output=True,
         text=True,
     )
@@ -46,6 +61,24 @@ def gh_graphql(query: str, variables: dict[str, object]) -> dict:
         capture_output=True,
         text=True,
     )
+    check_result(result)
+    return json.loads(result.stdout)
+
+
+def gh_graphql_json(query: str, variables: dict[str, object]) -> dict:
+    """Run a GraphQL request with JSON variables that cannot be encoded by -F."""
+    payload = {"query": query, "variables": variables}
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+        temp_path = Path(handle.name)
+    try:
+        result = subprocess.run(
+            ["gh", "api", "graphql", "--input", str(temp_path)],
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        temp_path.unlink(missing_ok=True)
     check_result(result)
     return json.loads(result.stdout)
 

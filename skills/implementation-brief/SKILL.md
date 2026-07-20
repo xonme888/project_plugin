@@ -29,6 +29,10 @@ When the LoaRing Product Ops MCP tools are available, start with:
 - `loaring_infer_project_fields` to verify contract fields and implementation target
 - `loaring_plan_story_work` to decide whether implementation can start and which branch target applies
 - `loaring_prepare_branch` to produce the standard branch name when the user asks for branch preparation
+- `loaring_create_work_branch` to create the branch only after the user approves the exact repo and target
+- `loaring_validate_branch_name` to check implementation repo branch naming before coding or PR work
+- `loaring_prepare_pr` to draft a PR title/body with `Related #...` and contract readiness context
+- `loaring_link_pr_to_project` to check PR linkage and, with approval, move the Story to `In Request`
 
 Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
 
@@ -38,6 +42,8 @@ Interpret `Contract Readiness` strictly:
 - `Frontend Ready` allows frontend/consumer implementation only.
 - `Ready` allows both backend and frontend implementation.
 - `Missing`, `Draft`, and `Blocked` do not allow implementation-ready briefs unless the user explicitly accepts the gap.
+
+Use `loaring_apply_workflow_transition` before implementation state changes. `start-backend` requires `Backend Ready` or `Ready`; `start-frontend` requires `Frontend Ready` or `Ready`; `request-review` is blocked while readiness is `Missing`, `Draft`, or `Blocked`.
 
 ## Provider Brief
 

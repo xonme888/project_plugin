@@ -26,6 +26,8 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 - `loaring_find_story` and `loaring_find_cached_stories` to check duplicate or related value
 - `loaring_get_story` to inspect an existing Story and Project fields
 - `loaring_infer_project_fields` to check `Contract Required`, `Contract Readiness`, and `Implementation Target`
+- `loaring_update_project_fields` to plan or apply approved Project field corrections after a Story issue exists
+- `loaring_sync_contract_readiness_options` to verify the Project has the current readiness option set
 - `loaring_validate_workflow` to audit Sprint or Project readiness after Story fields are set
 
 The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
@@ -69,9 +71,10 @@ Default checklist size:
 4. If the Story should be created in GitHub, map the draft to `.github/ISSUE_TEMPLATE/user-story.yml`.
 5. Use only Project fields: `Epic`, `Status`, `Sprint`, `Story Point`, `Contract Required`, `Contract Readiness`, `Implementation Target`.
 6. Keep owner assignment in GitHub assignees, not custom Project fields.
-7. If API work is needed, hand off to `api-contract`.
-8. If the Story draft needs detailed backend, frontend, or QA execution steps, hand off to `implementation-brief`.
-9. After a GitHub Issue number exists, update `traceability.yml`.
+7. After a GitHub Issue number exists, use `loaring_infer_project_fields` and, with explicit approval, `loaring_update_project_fields` for Project field alignment.
+8. If API work is needed, hand off to `api-contract`.
+9. If the Story draft needs detailed backend, frontend, or QA execution steps, hand off to `implementation-brief`.
+10. After a GitHub Issue number exists, update `traceability.yml`.
 
 ## External Actions
 

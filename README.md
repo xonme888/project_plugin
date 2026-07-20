@@ -60,7 +60,7 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 
 로컬 sqlite 캐시는 기본적으로 `~/.codex/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
 
-현재 MCP 도구는 read-only 동기화 범위다.
+MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Project 필드 수정, Issue comment 게시, 브랜치 생성처럼 외부 상태를 바꾸는 도구는 `apply=true`와 `confirm=true`가 모두 있어야 실행된다.
 
 - `loaring_sync_product`: product docs를 sqlite에 동기화
 - `loaring_find_story`: 요구사항, Story map, API catalog 캐시 검색
@@ -76,8 +76,18 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 - `loaring_plan_story_work`: Story의 Status, 계약 상태, target을 기준으로 다음 액션과 브랜치 후보 계산
 - `loaring_prepare_branch`: Story 번호와 target으로 표준 브랜치명과 git 명령 생성
 - `loaring_validate_workflow`: Project Story들의 필드 누락, 계약 상태 불일치, Status 리스크 점검
+- `loaring_update_project_fields`: MCP 추론값이나 명시 필드값을 GitHub Project에 반영할 변경 계획 생성 또는 승인 기반 적용
+- `loaring_sync_contract_readiness_options`: Project의 `Contract Readiness` 옵션을 표준값과 비교하고 승인 시 보정
+- `loaring_apply_workflow_transition`: 계약 gate를 확인한 뒤 `Status` 전이 계획 생성 또는 승인 기반 적용
+- `loaring_create_work_branch`: 표준 Story 브랜치를 계획하거나 승인 시 `git switch -c` 실행
+- `loaring_validate_branch_name`: 현재 또는 지정된 브랜치명이 Story/target 규칙과 맞는지 검사
+- `loaring_prepare_pr`: Story, target, 계약 상태 기준으로 PR 제목/본문 초안 생성
+- `loaring_link_pr_to_project`: PR 본문에 `Related #...` 연결이 있는지 확인하고 승인 시 Story를 `In Request`로 전이
+- `loaring_sprint_report`: Sprint별 Status, readiness, target, blocker 요약
+- `loaring_contract_gap_report`: `Contract Required=Yes`인데 readiness가 `Missing`, `Draft`, `Blocked`인 Story 목록
+- `loaring_create_api_contract_issue_comment`: `[계약 질문]`, `[계약 결정]` 댓글 본문 생성 또는 승인 기반 게시
 
-GitHub 동기화는 read-only다. Issue comment 작성, PR 생성, Project 필드 수정은 다음 단계의 승인 기반 write action으로 분리한다.
+PR 생성 자체는 아직 수행하지 않는다. `loaring_prepare_pr`은 제목/본문 초안을 만들고, 실제 PR 생성은 별도 승인 기반 GitHub 작업으로 둔다.
 
 GitHub Project v2 필드 조회에는 `gh` 토큰의 `read:project` scope가 필요하다. 해당 scope가 없으면 Project 동기화는 실패로 중단하지 않고 `blocked` 상태와 필요한 scope를 반환한다.
 
@@ -96,6 +106,14 @@ Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loari
 `loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Backend Ready`인 Story는 backend 브랜치만, `Frontend Ready`인 Story는 frontend 브랜치만, `Ready`인 Story는 양쪽 브랜치 후보를 반환한다.
 
 `loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다.
+
+Status 전이 규칙:
+
+- 계약 또는 product 정리 시작: `start-contract`, `start-product` -> `In Progress`
+- backend 구현 시작: `start-backend` -> `In Progress`, 단 `Contract Required=Yes`이면 `Backend Ready` 또는 `Ready` 필요
+- frontend 구현 시작: `start-frontend` -> `In Progress`, 단 `Contract Required=Yes`이면 `Frontend Ready` 또는 `Ready` 필요
+- PR 생성/리뷰 요청: `request-review` -> `In Request`, 단 readiness가 `Missing`, `Draft`, `Blocked`이면 차단
+- QA 통과/완료: `qa-pass`, `complete` -> `Done`, target별 완료 가능한 readiness 필요
 
 Contract Readiness 값:
 

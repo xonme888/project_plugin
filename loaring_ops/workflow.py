@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from typing import Any
 
 from .config import project_number, story_repo_name
 from .db import connect, init_db
+from .github_client import gh_api, gh_api_post
 from .github_sync import decode_project, decode_story
+from .github_project import STATUS_TRANSITIONS, require_confirm, update_project_fields
 from .product_sync import get_contract, infer_project_fields
 
 
@@ -50,6 +53,178 @@ def prepare_branch(
             "story": story_summary(story),
             "projectFields": (project or {}).get("fields", {}),
         },
+    }
+
+
+def create_work_branch(
+    story_issue: int,
+    target: str,
+    slug: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+    cwd: str | None = None,
+    apply: bool = False,  # noqa: A002 - MCP argument name
+    confirm: bool = False,
+) -> dict[str, Any]:
+    plan = prepare_branch(story_issue, target, slug=slug, repo=repo, number=number)
+    result: dict[str, Any] = {
+        **plan,
+        "cwd": cwd,
+        "apply": apply,
+        "confirmed": confirm,
+    }
+    if not apply:
+        result["status"] = "planned"
+        result["message"] = "Set apply=true and confirm=true to run git switch -c in the selected repo."
+        return result
+    require_confirm(confirm)
+    command = ["git", "switch", "-c", plan["branch"]]
+    completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    result["command"] = " ".join(command)
+    result["stdout"] = completed.stdout.strip()
+    result["stderr"] = completed.stderr.strip()
+    result["returnCode"] = completed.returncode
+    result["status"] = "created" if completed.returncode == 0 else "failed"
+    if completed.returncode != 0:
+        raise RuntimeError(result["stderr"] or result["stdout"] or "git switch failed")
+    return result
+
+
+def validate_branch_name(
+    story_issue: int,
+    target: str,
+    branch: str | None = None,
+    slug: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+    cwd: str | None = None,
+) -> dict[str, Any]:
+    plan = prepare_branch(story_issue, target, slug=slug, repo=repo, number=number)
+    actual = branch or current_branch(cwd)
+    pattern = branch_pattern(story_issue, normalize_target(target))
+    return {
+        "storyIssue": story_issue,
+        "target": plan["target"],
+        "actualBranch": actual,
+        "expectedBranch": plan["branch"],
+        "pattern": pattern.pattern,
+        "valid": bool(actual and pattern.fullmatch(actual)),
+        "message": "Branch name matches LoaRing workflow rules."
+        if actual and pattern.fullmatch(actual)
+        else "Branch name does not match the expected Story/target rule.",
+    }
+
+
+def apply_workflow_transition(
+    story_issue: int,
+    transition: str,
+    repo: str | None = None,
+    number: int | None = None,
+    apply: bool = False,  # noqa: A002 - MCP argument name
+    confirm: bool = False,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    story, project = cached_story_and_project(story_issue, selected_repo, selected_project)
+    fields = (project or {}).get("fields", {})
+    inference = infer_project_fields(story_issue=story_issue, repo=selected_repo, number=selected_project)
+    merged = {**inference["recommendedFields"], **fields}
+    normalized = transition.strip().lower()
+    if normalized not in STATUS_TRANSITIONS:
+        raise ValueError(f"Unsupported workflow transition: {transition}")
+    target_status = STATUS_TRANSITIONS[normalized]
+    blockers = transition_blockers(normalized, merged)
+    result: dict[str, Any] = {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "storyIssue": story_issue,
+        "transition": normalized,
+        "targetStatus": target_status,
+        "apply": apply,
+        "confirmed": confirm,
+        "story": story_summary(story),
+        "fields": fields,
+        "effectiveFields": merged,
+        "blockers": blockers,
+    }
+    if blockers:
+        result["status"] = "blocked"
+        return result
+    if not apply:
+        result["status"] = "planned"
+        result["changes"] = [{"field": "Status", "current": fields.get("Status"), "desired": target_status}]
+        result["message"] = "Set apply=true and confirm=true to write the Status field."
+        return result
+    require_confirm(confirm)
+    applied = update_project_fields(
+        story_issue=story_issue,
+        fields={"Status": target_status},
+        apply=True,
+        confirm=True,
+        repo=selected_repo,
+        number=selected_project,
+    )
+    result["status"] = "applied"
+    result["applied"] = applied
+    return result
+
+
+def prepare_pr(
+    story_issue: int,
+    target: str,
+    repo: str | None = None,
+    number: int | None = None,
+    branch: str | None = None,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    story, project = cached_story_and_project(story_issue, selected_repo, selected_project)
+    fields = (project or {}).get("fields", {})
+    inference = infer_project_fields(story_issue=story_issue, repo=selected_repo, number=selected_project)
+    readiness = fields.get("Contract Readiness") or inference["recommendedFields"]["Contract Readiness"]
+    implementation_target = fields.get("Implementation Target") or inference["recommendedFields"]["Implementation Target"]
+    normalized_target = normalize_target(target)
+    blockers = implementation_blockers(normalized_target, {
+        "Contract Required": fields.get("Contract Required") or inference["recommendedFields"]["Contract Required"],
+        "Contract Readiness": readiness,
+        "Implementation Target": implementation_target,
+    })
+    title_target = {
+        "backend": "Backend",
+        "frontend": "Frontend",
+        "contract": "Contract",
+        "product": "Product",
+    }.get(normalized_target, normalized_target.title())
+    story_title = (story or {}).get("title") or f"Story #{story_issue}"
+    title = f"{title_target}: {story_title} (#{story_issue})"
+    body = "\n".join(
+        [
+            f"Related #{story_issue}",
+            "",
+            "## Scope",
+            f"- Target: {title_target}",
+            f"- Contract Readiness: {readiness}",
+            f"- Implementation Target: {implementation_target}",
+            "",
+            "## Checks",
+            "- [ ] Story acceptance criteria reviewed",
+            "- [ ] Contract impact checked",
+            "- [ ] QA notes updated if needed",
+        ]
+    )
+    return {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "storyIssue": story_issue,
+        "target": normalized_target,
+        "branch": branch,
+        "title": title,
+        "body": body,
+        "blocked": bool(blockers),
+        "blockers": blockers,
+        "story": story_summary(story),
+        "fields": fields,
+        "inference": inference,
     }
 
 
@@ -140,6 +315,188 @@ def validate_workflow(
     }
 
 
+def sprint_report(
+    repo: str | None = None,
+    number: int | None = None,
+    sprint: str | None = None,
+) -> dict[str, Any]:
+    validation = validate_workflow(repo=repo, number=number, sprint=sprint)
+    summary: dict[str, dict[str, int]] = {
+        "byStatus": {},
+        "byReadiness": {},
+        "byTarget": {},
+    }
+    blockers: list[dict[str, Any]] = []
+    for story in validation["stories"]:
+        fields = story["fields"]
+        bump(summary["byStatus"], str(fields.get("Status") or "Unassigned"))
+        bump(summary["byReadiness"], str(fields.get("Contract Readiness") or "Unassigned"))
+        bump(summary["byTarget"], str(fields.get("Implementation Target") or "Unassigned"))
+        if story["findings"]:
+            blockers.append(
+                {
+                    "issueNumber": story["issueNumber"],
+                    "title": story["title"],
+                    "findings": story["findings"],
+                }
+            )
+    return {
+        "repo": validation["repo"],
+        "projectNumber": validation["projectNumber"],
+        "sprint": sprint,
+        "storyCount": validation["storyCount"],
+        "summary": summary,
+        "blockerCount": len(blockers),
+        "blockers": blockers,
+    }
+
+
+def contract_gap_report(
+    repo: str | None = None,
+    number: int | None = None,
+    sprint: str | None = None,
+) -> dict[str, Any]:
+    validation = validate_workflow(repo=repo, number=number, sprint=sprint)
+    gaps: list[dict[str, Any]] = []
+    for story in validation["stories"]:
+        fields = story["fields"]
+        required = fields.get("Contract Required") or story["recommendedFields"].get("Contract Required")
+        readiness = fields.get("Contract Readiness") or story["recommendedFields"].get("Contract Readiness")
+        if required == "Yes" and readiness in {"Missing", "Draft", "Blocked"}:
+            gaps.append(
+                {
+                    "issueNumber": story["issueNumber"],
+                    "title": story["title"],
+                    "url": story["url"],
+                    "contractReadiness": readiness,
+                    "implementationTarget": fields.get("Implementation Target")
+                    or story["recommendedFields"].get("Implementation Target"),
+                    "recommendedFields": story["recommendedFields"],
+                }
+            )
+    return {
+        "repo": validation["repo"],
+        "projectNumber": validation["projectNumber"],
+        "sprint": sprint,
+        "gapCount": len(gaps),
+        "gaps": gaps,
+    }
+
+
+def create_api_contract_issue_comment(
+    story_issue: int,
+    kind: str,
+    question: str | None = None,
+    decision: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+    apply: bool = False,  # noqa: A002 - MCP argument name
+    confirm: bool = False,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    story, project = cached_story_and_project(story_issue, selected_repo, selected_project)
+    normalized_kind = kind.strip().lower()
+    if normalized_kind not in {"question", "decision"}:
+        raise ValueError("kind must be question or decision")
+    heading = "[계약 질문]" if normalized_kind == "question" else "[계약 결정]"
+    content = question if normalized_kind == "question" else decision
+    if not content:
+        content = "TODO: API 요청/응답/에러/권한/검증 기준을 구체적으로 적는다."
+    body = "\n".join(
+        [
+            heading,
+            "",
+            f"- Story: #{story_issue}",
+            f"- 제목: {(story or {}).get('title') or ''}",
+            f"- Contract Readiness: {((project or {}).get('fields') or {}).get('Contract Readiness') or ''}",
+            "",
+            content,
+        ]
+    )
+    result: dict[str, Any] = {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "storyIssue": story_issue,
+        "kind": normalized_kind,
+        "body": body,
+        "apply": apply,
+        "confirmed": confirm,
+        "story": story_summary(story),
+        "projectFields": (project or {}).get("fields", {}),
+    }
+    if not apply:
+        result["status"] = "planned"
+        result["message"] = "Set apply=true and confirm=true to post this Issue comment."
+        return result
+    require_confirm(confirm)
+    posted = gh_api_post(f"repos/{selected_repo}/issues/{story_issue}/comments", {"body": body})
+    result["status"] = "posted"
+    result["comment"] = {
+        "id": posted.get("id"),
+        "url": posted.get("html_url"),
+    }
+    return result
+
+
+def link_pr_to_project(
+    pr_number: int,
+    story_issue: int | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+    body: str | None = None,
+    apply: bool = False,  # noqa: A002 - MCP argument name
+    confirm: bool = False,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    pr_payload: dict[str, Any] | None = None
+    pr_body = body
+    if pr_body is None:
+        pr_payload = gh_api(f"repos/{selected_repo}/pulls/{pr_number}")
+        pr_body = pr_payload.get("body") or ""
+    detected = detect_related_story(pr_body)
+    selected_story = story_issue or detected
+    missing_related = selected_story is None or f"#{selected_story}" not in pr_body
+    result: dict[str, Any] = {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "prNumber": pr_number,
+        "storyIssue": selected_story,
+        "detectedStoryIssue": detected,
+        "hasRelatedReference": not missing_related,
+        "apply": apply,
+        "confirmed": confirm,
+        "pr": None if pr_payload is None else {
+            "title": pr_payload.get("title"),
+            "state": pr_payload.get("state"),
+            "url": pr_payload.get("html_url"),
+        },
+    }
+    if missing_related:
+        result["status"] = "blocked"
+        result["blockers"] = ["PR body is missing a Related #<story> reference."]
+        return result
+    if not apply:
+        result["status"] = "planned"
+        result["message"] = "Set apply=true and confirm=true to move the linked Story to In Request."
+        result["changes"] = [{"storyIssue": selected_story, "field": "Status", "desired": "In Request"}]
+        return result
+    require_confirm(confirm)
+    assert selected_story is not None
+    transition = apply_workflow_transition(
+        story_issue=selected_story,
+        transition="request-review",
+        repo=selected_repo,
+        number=selected_project,
+        apply=True,
+        confirm=True,
+    )
+    result["status"] = "applied"
+    result["transition"] = transition
+    return result
+
+
 def cached_story_and_project(
     story_issue: int,
     repo: str,
@@ -156,6 +513,85 @@ def cached_story_and_project(
         (repo, selected_project, story_issue),
     ).fetchone()
     return decode_story(story_row), decode_project(project_row)
+
+
+def current_branch(cwd: str | None = None) -> str | None:
+    completed = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True)
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def branch_pattern(story_issue: int, target: str) -> re.Pattern[str]:
+    prefix = TARGET_PREFIXES[target]
+    suffix = r"-contract" if target == "contract" else ""
+    return re.compile(rf"{re.escape(prefix)}/{story_issue}-[a-z0-9]+(?:-[a-z0-9]+)*{suffix}")
+
+
+def transition_blockers(transition: str, fields: dict[str, Any]) -> list[str]:
+    if transition in {"start-backend", "start-frontend"}:
+        target = "backend" if transition == "start-backend" else "frontend" if transition == "start-frontend" else "backend"
+        blockers = implementation_blockers(target, fields)
+        if blockers:
+            return blockers
+    if transition == "request-review" and fields.get("Contract Required") == "Yes":
+        readiness = fields.get("Contract Readiness")
+        if readiness in {"Missing", "Draft", "Blocked"}:
+            return [f"Contract Required=Yes but Contract Readiness is {readiness}."]
+    if transition in {"qa-pass", "complete"}:
+        required = fields.get("Contract Required")
+        readiness = fields.get("Contract Readiness")
+        target = fields.get("Implementation Target")
+        if required == "Yes" and not completion_readiness_ok(target, readiness):
+            return [f"Cannot complete {target or 'Story'} while Contract Readiness is {readiness}."]
+    return []
+
+
+def implementation_blockers(target: str, fields: dict[str, Any]) -> list[str]:
+    required = fields.get("Contract Required")
+    readiness = fields.get("Contract Readiness")
+    implementation_target = fields.get("Implementation Target")
+    if required != "Yes":
+        return []
+    if readiness in {"Missing", "Draft", "Blocked"}:
+        return [f"Contract Required=Yes but Contract Readiness is {readiness}."]
+    if target == "backend" and readiness not in {"Backend Ready", "Ready"}:
+        return [f"Backend work requires Backend Ready or Ready, got {readiness}."]
+    if target == "frontend" and readiness not in {"Frontend Ready", "Ready"}:
+        return [f"Frontend work requires Frontend Ready or Ready, got {readiness}."]
+    if target == "backend" and implementation_target not in {"Backend", "Backend+Frontend"}:
+        return [f"Implementation Target does not include Backend: {implementation_target}."]
+    if target == "frontend" and implementation_target not in {"Frontend", "Backend+Frontend"}:
+        return [f"Implementation Target does not include Frontend: {implementation_target}."]
+    return []
+
+
+def completion_readiness_ok(target: str | None, readiness: str | None) -> bool:
+    if target == "Backend":
+        return readiness in {"Backend Ready", "Ready"}
+    if target == "Frontend":
+        return readiness in {"Frontend Ready", "Ready"}
+    if target == "Backend+Frontend":
+        return readiness == "Ready"
+    return readiness not in {"Missing", "Draft", "Blocked"}
+
+
+def bump(values: dict[str, int], key: str) -> None:
+    values[key] = values.get(key, 0) + 1
+
+
+def detect_related_story(body: str) -> int | None:
+    patterns = [
+        r"Related\s+#(\d+)",
+        r"Relates\s+to\s+#(\d+)",
+        r"Closes\s+#(\d+)",
+        r"Fixes\s+#(\d+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, body, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def next_actions(status: str | None, readiness: str, target: str, has_spec: bool) -> list[str]:
