@@ -25,6 +25,7 @@ from loaring_ops.github_sync import (  # noqa: E402
     sync_project,
     sync_stories,
 )
+from loaring_ops.migration import migration_dry_run  # noqa: E402
 
 
 JsonDict = dict[str, Any]
@@ -137,6 +138,17 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "loaring_migration_dry_run": {
+        "description": "Build a read-only migration plan from legacy Story issues into loaring-product.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sync": {"type": "boolean"},
+                "includeBodies": {"type": "boolean"},
+            },
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -219,6 +231,10 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
             query=args["query"],
             limit=int(args.get("limit") or 10),
             repo=args.get("repo"),
+        ),
+        "loaring_migration_dry_run": lambda args: migration_dry_run(
+            sync=bool(args.get("sync", True)),
+            include_bodies=bool(args.get("includeBodies")),
         ),
     }
     if name not in handlers:

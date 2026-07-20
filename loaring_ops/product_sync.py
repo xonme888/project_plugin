@@ -320,6 +320,8 @@ def parse_traceability(content: str) -> list[dict[str, Any]]:
         elif stripped.startswith("apiSpecs:"):
             current["apiSpecs"] = inline_list(stripped.split(":", 1)[1])
             active_list = "apiSpecs"
+        elif stripped.endswith(":"):
+            active_list = None
         elif stripped.startswith("- ") and active_list == "apiSpecs":
             current["apiSpecs"].append(scalar(stripped[2:]))
 

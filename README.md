@@ -71,12 +71,23 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 - `loaring_sync_github`: Story Issue와 Project 필드값을 함께 동기화
 - `loaring_get_story`: Story Issue와 Project 필드값 조회
 - `loaring_find_cached_stories`: 캐시된 Story Issue 제목/본문 검색
+- `loaring_migration_dry_run`: legacy Story Issue를 `loaring-product`로 옮기기 전 read-only 마이그레이션 계획 생성
 
 GitHub 동기화는 read-only다. Issue comment 작성, PR 생성, Project 필드 수정은 다음 단계의 승인 기반 write action으로 분리한다.
 
 GitHub Project v2 필드 조회에는 `gh` 토큰의 `read:project` scope가 필요하다. 해당 scope가 없으면 Project 동기화는 실패로 중단하지 않고 `blocked` 상태와 필요한 scope를 반환한다.
 
 Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loaring-product`를 조회한다. 과거 Story가 `loaring-story/loaring-sotry`에 남아 있는 경우 `--include-legacy` 또는 MCP `includeLegacy: true`로 legacy repo를 read-only 보강 조회할 수 있다. 새 Story, 새 계약, Project 운영의 기준은 `loaring-product`다.
+
+마이그레이션 전에는 먼저 드라이런 리포트를 만든다.
+
+```bash
+python3 scripts/migration_dry_run.py
+```
+
+이 스크립트는 product docs와 legacy Issue를 조회하지만 GitHub에는 쓰지 않는다. 실제 Issue 생성, Project 필드 복원, `traceability.yml`/`api-catalog.yml` 갱신은 별도 승인 기반 단계로 진행한다.
+
+드라이런 리포트에서 `create-in-product`는 아직 product repo에서 매칭되는 Story Issue를 찾지 못했다는 뜻이다. `linkedRequirements`와 `linkedApiSpecs`가 있는 항목은 product 문서가 이미 legacy Issue 번호를 참조하고 있으므로, 실제 마이그레이션 후 새 product Issue 번호로 연결 파일을 갱신해야 한다.
 
 ## 독립성 점검
 
