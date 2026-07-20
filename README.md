@@ -11,6 +11,7 @@ Codex에서 LoaRing의 product 운영을 돕는 독립 플러그인 프로젝트
 | Story intake | 사용자 가치를 GitHub Story 초안과 Project 필드 후보로 정리 |
 | Requirement analysis | 기존 Story/API와의 중복, 충돌, 미결정 질문 분석 |
 | API contract | 확정 계약 작성, 변경 분류, breaking change 판단 |
+| Contract registry lookup | GitHub의 product repo에서 API 명세와 registry 조회 |
 | Shared contract rules | 공통 에러코드, API 명명규칙, response envelope, validation 표현 기준 정리 |
 | Project gate | GitHub Issue, PR, Project 필드의 준비 상태를 읽기 전용으로 점검 |
 
@@ -39,6 +40,7 @@ loaring-product-ops
 ## 사용 원칙
 
 - product repo가 Story, 요구사항, API 계약의 단일 원본이다.
+- backend/frontend 개발자는 product repo를 clone하지 않아도 GitHub 조회로 계약을 확인할 수 있어야 한다.
 - backend와 frontend는 서로의 저장소를 직접 읽거나 수정하지 않는다.
 - backend/frontend 작업 중 계약 변경이 필요하면 product Story 또는 product PR에 변경 요청을 남긴다.
 - backend/frontend 팀 고유의 개발 skill은 각 팀 저장소에서 관리한다.
@@ -62,3 +64,14 @@ python3 scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-
 ```
 
 이 검증은 각 저장소 문서에 monorepo 전제나 상대 경로 결합이 남아 있는지 확인한다.
+
+## GitHub 계약 조회
+
+`gh` 인증이 되어 있으면 product repo를 clone하지 않고 계약 파일을 조회할 수 있다.
+
+```bash
+python3 scripts/fetch_product_contract.py
+python3 scripts/fetch_product_contract.py --path docs/api/212-auth-signup-login.api-spec.json
+```
+
+기본 조회 대상은 `loaring-story/loaring-product@develop`이다.

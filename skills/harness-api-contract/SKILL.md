@@ -22,20 +22,21 @@ description: "Prepare, review, and update LoaRing API contracts linked to a GitH
 1. Read the Story Issue and Project fields.
 2. Confirm `Contract Required=Yes` and the relevant Backend/Frontend assignees or reviewers.
 3. Check `docs/requirements/traceability.yml` and `docs/api/api-catalog.yml` for existing requirement/API links.
-4. Create or update `docs/api/{issue}-{domain}-{feature}.api-spec.json`.
-5. Add or update metadata in `docs/api/api-catalog.yml`.
-6. Move unresolved questions to the Story Issue or PR Review; do not put them in the API file.
-7. Apply only accepted decisions to the API contract.
-8. Update `docs/requirements/traceability.yml` when a new Story/API link is created.
-9. Open one initial `docs/{issue}-{slug}-contract` PR into `develop`.
-10. Require:
+4. Check `docs/contracts/error-codes.yml`, `naming-rules.yml`, and `response-envelope.yml` before adding new shared names or error codes.
+5. Create or update `docs/api/{issue}-{domain}-{feature}.api-spec.json`.
+6. Add or update metadata in `docs/api/api-catalog.yml`.
+7. Move unresolved questions to the Story Issue or PR Review; do not put them in the API file.
+8. Apply only accepted decisions to the API contract.
+9. Update `docs/requirements/traceability.yml` when a new Story/API link is created.
+10. Open one initial `docs/{issue}-{slug}-contract` PR into `develop`.
+11. Require:
    - docs CI success
    - no unresolved review threads
    - `Status` is not `Blocked`
    - counterpart approval when the author is one of the Story assignees
    - both Backend and Frontend approval when the author is outside the assigned pair
-11. The author may merge after the gate passes. PM merge is not required for an ordinary contract.
-12. Link the PR to the Story with `Related #<issue>`. Do not record PR URLs in Project fields.
+12. The author may merge after the gate passes. PM merge is not required for an ordinary contract.
+13. Link the PR to the Story with `Related #<issue>`. Do not record PR URLs in Project fields.
 
 ## Approval Rule
 
