@@ -10,7 +10,7 @@ DEFAULT_PRODUCT_REPO = "loaring-story/loaring-product"
 DEFAULT_STORY_REPO = DEFAULT_PRODUCT_REPO
 DEFAULT_LEGACY_STORY_REPOS = ["loaring-story/loaring-sotry"]
 DEFAULT_REF = "develop"
-DEFAULT_PROJECT_NUMBER = 2
+DEFAULT_PROJECT_NUMBER = 7
 DEFAULT_DATA_DIR = Path.home() / ".codex" / "loaring-product-ops"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "loaring-product-ops.sqlite"
 
