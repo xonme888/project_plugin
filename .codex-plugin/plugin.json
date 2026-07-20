@@ -1,11 +1,12 @@
 {
   "name": "loaring-product-ops",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260720134652",
   "description": "Codex plugin for LoaRing product operations: Story intake, requirement analysis, API contracts, and implementation briefs.",
   "author": {
     "name": "LoaRing"
   },
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "LoaRing Product Ops",
     "shortDescription": "Work with LoaRing Stories, requirements, API contracts, and implementation briefs.",
@@ -16,7 +17,8 @@
       "Story intake",
       "Requirement analysis",
       "API contract management",
-      "Implementation briefs"
+      "Implementation briefs",
+      "Product contract lookup"
     ],
     "defaultPrompt": "Use LoaRing Product Ops to inspect product Stories, requirements, API contracts, and implementation boundaries before changing backend or frontend code."
   }

@@ -20,6 +20,17 @@ Read from `loaring-story/loaring-product@develop` unless the user gives another 
 
 If `loaring-product` is not cloned, fetch files through GitHub or `scripts/fetch_product_contract.py --path <path>`.
 
+When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
+
+- `loaring_sync_product` to refresh the local sqlite cache from `loaring-product`
+- `loaring_sync_github` to refresh Story Issue and Project field caches
+- `loaring_find_story` to search existing requirements, story-map entries, and API specs
+- `loaring_find_cached_stories` to search cached GitHub Story Issues
+- `loaring_get_story` to inspect Story body and Project fields
+- `loaring_get_contract` to inspect linked contract metadata
+
+The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
+
 ## Classification
 
 | Situation | Result |
@@ -44,10 +55,11 @@ If `loaring-product` is not cloned, fetch files through GitHub or `scripts/fetch
 
 1. Separate product value, API contract impact, implementation detail, and open question.
 2. Search `story-map.md` and `traceability.yml` for overlap.
-3. Search `api-catalog.yml` for affected endpoint IDs and spec files.
-4. Read related API specs and shared contract files when API impact exists.
-5. Produce a requirement-analysis draft using the versioned template shape.
-6. Recommend one next action: Story creation, Story refinement, contract question, PM decision request, implementation brief, or hold.
+3. Search existing GitHub Story Issues and Project fields when available.
+4. Search `api-catalog.yml` for affected endpoint IDs and spec files.
+5. Read related API specs and shared contract files when API impact exists.
+6. Produce a requirement-analysis draft using the versioned template shape.
+7. Recommend one next action: Story creation, Story refinement, contract question, PM decision request, implementation brief, or hold.
 
 ## External Actions
 

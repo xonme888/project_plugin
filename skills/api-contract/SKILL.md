@@ -1,6 +1,6 @@
 ---
 name: api-contract
-description: "Prepare, inspect, or change LoaRing product API contracts. Use for API spec creation, contract registry lookup, shared error/naming rules, provider/consumer review, breaking-change classification, and product PR preparation."
+description: "Prepare, inspect, or change LoaRing product API contracts. Default to a lightweight contract brief; create full api-spec JSON only when explicitly requested."
 ---
 
 # API Contract
@@ -26,7 +26,37 @@ python3 scripts/fetch_product_contract.py
 python3 scripts/fetch_product_contract.py --path docs/api/<file>.api-spec.json
 ```
 
+When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
+
+- `loaring_sync_product` to refresh the local sqlite cache from `loaring-product`
+- `loaring_get_contract` to inspect linked API contract metadata
+- `loaring_validate_contract_readiness` to check whether implementation can start
+
+The local sqlite cache is not source of truth. It may store snapshots, indexes, and drafts, but accepted contracts must live in `loaring-product`.
+
 ## Contract Shape
+
+Default output is a contract brief, not a full `*.api-spec.json` file.
+
+The contract brief should include:
+
+- Story or requirement link
+- API impact and change type
+- affected or proposed `docs/api/*.api-spec.json` path
+- endpoint candidates, with method/path only when there is enough evidence
+- shared contract checks to perform
+- contract questions and decisions
+- next product action
+
+Do not write full request/response schemas, error lists, or validation matrices unless the user explicitly asks for full API spec JSON.
+
+Produce full `*.api-spec.json` only when the user explicitly asks for "full api-spec json", "전체 api-spec.json", "완전한 JSON spec", "API spec 파일 전체", or equivalent wording.
+
+If the user says only "API 명세 작성" and also asks to create or edit a repository file, ask whether they want a contract brief or a full `*.api-spec.json`.
+
+Contract brief is not sufficient for independent provider/consumer implementation. Before backend and frontend implementation starts, create or reference a full `*.api-spec.json` from `loaring-product`, or clearly mark the work as blocked by missing contract.
+
+Full `*.api-spec.json` creation or edits must happen in `loaring-product`, not backend or frontend implementation repositories. When running outside `loaring-product`, produce a contract brief or product PR proposal instead of writing spec files.
 
 API specs use provider/consumer language:
 
@@ -39,7 +69,7 @@ Do not add implementation repository paths such as `frontend/lib/...` or `backen
 
 ## Registry Lookup
 
-Before adding names, fields, envelopes, or errors:
+Before adding names, fields, envelopes, or errors in either brief or full spec mode:
 
 1. Read `registry.yml` to find the active files.
 2. Check existing error codes, endpoint naming, field naming, enum naming, pagination, sorting, filtering, auth, and response envelope rules.
@@ -63,11 +93,21 @@ Change type values are `additive`, `behavioral`, `breaking`, and `unknown`.
 
 1. Locate the Story, requirement IDs, affected endpoints, and existing API specs.
 2. Inspect shared contract registry before inventing names or errors.
-3. Draft or update `docs/api/{issue}-{domain}-{feature}.api-spec.json` using `template.api-spec.json`.
-4. Update `api-catalog.yml` and `traceability.yml` when links change.
-5. Move unresolved questions to `[계약 질문]`; record accepted outcomes as `[계약 결정]`.
-6. Require counterpart review: provider author needs consumer approval, consumer author needs provider approval, external author needs both.
-7. For breaking changes, include a compatibility plan before merge.
+3. Default to a contract brief unless the user explicitly requested full `*.api-spec.json`.
+4. In contract brief mode, propose the spec path, endpoint candidates, shared-rule checks, contract questions, and next product action.
+5. In full spec mode, draft or update `docs/api/{issue}-{domain}-{feature}.api-spec.json` using `template.api-spec.json`.
+6. Update `api-catalog.yml` and `traceability.yml` when links change and the user approved product doc edits.
+7. Move unresolved questions to `[계약 질문]`; record accepted outcomes as `[계약 결정]`.
+8. Require counterpart review: provider author needs consumer approval, consumer author needs provider approval, external author needs both.
+9. For breaking changes, include a compatibility plan before merge.
+
+## Output Guardrails
+
+- Keep contract brief concise enough to paste into a Story comment or product PR description.
+- Do not include implementation repository paths, database schema, service classes, frontend components, or state management details.
+- Do not duplicate the same question across product, contract, and implementation sections.
+- Use `[계약 질문]` for unresolved contract decisions.
+- Use `[계약 결정]` only for outcomes the user says are accepted.
 
 ## External Actions
 

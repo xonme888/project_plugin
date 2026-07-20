@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "loaring-product-ops": {
+      "command": "python3",
+      "args": ["./mcp/server.py"],
+      "cwd": "."
+    }
+  }
+}

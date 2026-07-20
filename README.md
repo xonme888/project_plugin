@@ -54,6 +54,30 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 
 기본 조회 대상은 `loaring-story/loaring-product@develop`이다.
 
+## MCP와 로컬 캐시
+
+패키징된 플러그인은 MCP 서버를 통해 `loaring-product` 조회를 캡슐화한다. Backend나 frontend 저장소에서 플러그인을 실행하는 사용자는 product 저장소 구조를 직접 알 필요 없이 Story/API 계약 메타데이터를 조회할 수 있다.
+
+로컬 sqlite 캐시는 기본적으로 `~/.codex/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
+
+현재 MCP 도구는 read-only 동기화 범위다.
+
+- `loaring_sync_product`: product docs를 sqlite에 동기화
+- `loaring_find_story`: 요구사항, Story map, API catalog 캐시 검색
+- `loaring_get_contract`: Story 또는 requirement에 연결된 API 계약 메타데이터 조회
+- `loaring_validate_contract_readiness`: 구현 착수 가능한 full API 계약 연결 여부 점검
+- `loaring_sync_stories`: GitHub Story Issue를 sqlite에 동기화
+- `loaring_sync_project`: GitHub Project 필드값을 sqlite에 동기화
+- `loaring_sync_github`: Story Issue와 Project 필드값을 함께 동기화
+- `loaring_get_story`: Story Issue와 Project 필드값 조회
+- `loaring_find_cached_stories`: 캐시된 Story Issue 제목/본문 검색
+
+GitHub 동기화는 read-only다. Issue comment 작성, PR 생성, Project 필드 수정은 다음 단계의 승인 기반 write action으로 분리한다.
+
+GitHub Project v2 필드 조회에는 `gh` 토큰의 `read:project` scope가 필요하다. 해당 scope가 없으면 Project 동기화는 실패로 중단하지 않고 `blocked` 상태와 필요한 scope를 반환한다.
+
+Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loaring-product`를 조회한다. 과거 Story가 `loaring-story/loaring-sotry`에 남아 있는 경우 `--include-legacy` 또는 MCP `includeLegacy: true`로 legacy repo를 read-only 보강 조회할 수 있다. 새 Story, 새 계약, Project 운영의 기준은 `loaring-product`다.
+
 ## 독립성 점검
 
 ```bash

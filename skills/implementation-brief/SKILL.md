@@ -19,6 +19,16 @@ Read from `loaring-story/loaring-product@develop` unless the user gives another 
 
 If `loaring-product` is not cloned, fetch files through GitHub or `scripts/fetch_product_contract.py --path <path>`.
 
+When the LoaRing Product Ops MCP tools are available, start with:
+
+- `loaring_sync_product` when the local cache is stale or empty
+- `loaring_sync_github` when Story body or Project fields may be stale
+- `loaring_get_story` to inspect Story body, assignees, and Project fields
+- `loaring_validate_contract_readiness` before producing provider or consumer briefs for API work
+- `loaring_get_contract` to retrieve linked API contract metadata
+
+Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
+
 ## Provider Brief
 
 Include only:
