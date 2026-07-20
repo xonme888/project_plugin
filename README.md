@@ -65,7 +65,7 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 - `loaring_sync_product`: product docs를 sqlite에 동기화
 - `loaring_find_story`: 요구사항, Story map, API catalog 캐시 검색
 - `loaring_get_contract`: Story 또는 requirement에 연결된 API 계약 메타데이터 조회
-- `loaring_validate_contract_readiness`: 구현 착수 가능한 full API 계약 연결 여부 점검
+- `loaring_validate_contract_readiness`: backend/frontend 구현 착수 가능한 API 계약 준비 상태 점검
 - `loaring_infer_project_fields`: Story/API 문서 기준으로 `Contract Required`, `Contract Readiness`, `Implementation Target` 권장값 계산
 - `loaring_sync_stories`: GitHub Story Issue를 sqlite에 동기화
 - `loaring_sync_project`: GitHub Project 필드값을 sqlite에 동기화
@@ -93,9 +93,19 @@ Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loari
 - Fix: `fix/{issue-id}-{slug}`
 - 일반 문서/운영: `docs/{slug}` 또는 `chore/{slug}`
 
-`loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Ready`인 Story는 provider/consumer 브랜치 후보를 반환한다.
+`loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Backend Ready`인 Story는 backend 브랜치만, `Frontend Ready`인 Story는 frontend 브랜치만, `Ready`인 Story는 양쪽 브랜치 후보를 반환한다.
 
 `loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다.
+
+Contract Readiness 값:
+
+- `Not Required`: API 계약이 필요 없는 Story
+- `Missing`: API 계약이 필요하지만 연결된 full api-spec이 없음
+- `Draft`: 계약 초안은 있으나 backend/frontend 구현 착수 기준이 아직 부족함
+- `Backend Ready`: API provider인 backend가 구현 시작 가능한 상태
+- `Frontend Ready`: API consumer인 frontend가 구현 시작 가능한 상태
+- `Ready`: backend와 frontend 모두 구현 시작 가능한 상태
+- `Blocked`: 권한, 응답, 에러, API 분리 등 계약 결정이 막힌 상태
 
 마이그레이션 전에는 먼저 드라이런 리포트를 만든다.
 

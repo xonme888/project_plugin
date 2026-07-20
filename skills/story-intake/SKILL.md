@@ -41,6 +41,8 @@ The local sqlite cache is not source of truth. Treat it as a read-through cache 
 - Epic, Story Point, Contract Required, Contract Readiness, Implementation Target, Sprint when known
 - GitHub assignees for owner roles
 
+Use user-facing Contract Readiness values: `Not Required`, `Missing`, `Draft`, `Backend Ready`, `Frontend Ready`, `Ready`, `Blocked`. `Backend Ready` means API provider implementation can start; `Frontend Ready` means API consumer implementation can start.
+
 ## Scope Level
 
 Story intake produces a product Story, not an implementation plan.

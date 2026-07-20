@@ -13,6 +13,17 @@ from .db import connect, init_db
 from .github_client import fetch_file
 
 
+CONTRACT_READINESS_VALUES = {
+    "Not Required",
+    "Missing",
+    "Draft",
+    "Backend Ready",
+    "Frontend Ready",
+    "Ready",
+    "Blocked",
+}
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -26,19 +37,16 @@ def sync_product(repo: str | None = None, ref: str | None = None) -> dict[str, A
 
     fetched: list[dict[str, Any]] = []
     for path in PRODUCT_PATHS:
-        content, sha = fetch_file(selected_repo, selected_ref, path)
-        conn.execute(
-            """
-            INSERT INTO product_snapshots (repo, ref, path, sha, content, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(repo, ref, path) DO UPDATE SET
-              sha = excluded.sha,
-              content = excluded.content,
-              fetched_at = excluded.fetched_at
-            """,
-            (selected_repo, selected_ref, path, sha, content, fetched_at),
-        )
-        fetched.append({"path": path, "sha": sha})
+        fetched.append(fetch_and_save_snapshot(conn, selected_repo, selected_ref, path, fetched_at))
+
+    catalog_content = snapshot(conn, "docs/api/api-catalog.yml", selected_repo, selected_ref)
+    if catalog_content:
+        known_paths = {item["path"] for item in fetched}
+        for spec in parse_api_catalog(catalog_content):
+            path = spec.get("path")
+            if isinstance(path, str) and path and path not in known_paths:
+                fetched.append(fetch_and_save_snapshot(conn, selected_repo, selected_ref, path, fetched_at))
+                known_paths.add(path)
 
     index_cached_product(conn, selected_repo, selected_ref, fetched_at)
     conn.execute(
@@ -54,6 +62,28 @@ def sync_product(repo: str | None = None, ref: str | None = None) -> dict[str, A
     )
     conn.commit()
     return {"repo": selected_repo, "ref": selected_ref, "fetchedAt": fetched_at, "files": fetched}
+
+
+def fetch_and_save_snapshot(
+    conn: sqlite3.Connection,
+    repo: str,
+    ref: str,
+    path: str,
+    fetched_at: str,
+) -> dict[str, str | None]:
+    content, sha = fetch_file(repo, ref, path)
+    conn.execute(
+        """
+        INSERT INTO product_snapshots (repo, ref, path, sha, content, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repo, ref, path) DO UPDATE SET
+          sha = excluded.sha,
+          content = excluded.content,
+          fetched_at = excluded.fetched_at
+        """,
+        (repo, ref, path, sha, content, fetched_at),
+    )
+    return {"path": path, "sha": sha}
 
 
 def snapshot(conn: sqlite3.Connection, path: str, repo: str | None = None, ref: str | None = None) -> str | None:
@@ -193,7 +223,9 @@ def get_contract(story_issue: int | None = None, requirement_id: str | None = No
 
 def validate_contract_readiness(story_issue: int | None = None, requirement_id: str | None = None) -> dict[str, Any]:
     contract = get_contract(story_issue=story_issue, requirement_id=requirement_id)
-    specs = contract["apiSpecs"]
+    conn = connect()
+    init_db(conn)
+    specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], None)
     issues: list[str] = []
     if not specs:
         issues.append("No linked full api-spec entry found in api-catalog.yml.")
@@ -202,12 +234,13 @@ def validate_contract_readiness(story_issue: int | None = None, requirement_id: 
             issues.append(f"{spec.get('path')}: lifecycle is missing or unknown.")
         if not spec.get("endpoints"):
             issues.append(f"{spec.get('path')}: no endpoints indexed.")
-    ready = not issues and bool(specs)
+    readiness = infer_contract_readiness("Yes", {"apiSpecs": specs}, None)
+    ready = readiness == "Ready" and not issues
     return {
         "ready": ready,
-        "status": "ready" if ready else "blocked",
+        "status": readiness,
         "issues": issues,
-        "contract": contract,
+        "contract": {**contract, "apiSpecs": specs},
     }
 
 
@@ -231,7 +264,9 @@ def infer_project_fields(
     project_fields = latest_project_fields(conn, selected_repo, selected_project, story_issue)
 
     contract_required = infer_contract_required(contract, story)
-    contract_readiness = infer_contract_readiness(contract_required, contract)
+    enriched_specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], story)
+    enriched_contract = {**contract, "apiSpecs": enriched_specs}
+    contract_readiness = infer_contract_readiness(contract_required, enriched_contract, story)
     implementation_target = infer_implementation_target(contract_required, contract, story)
     recommended = {
         "Contract Required": contract_required,
@@ -253,8 +288,8 @@ def infer_project_fields(
         "mismatches": mismatches,
         "evidence": {
             "story": minimal_story(story),
-            "requirements": contract["requirements"],
-            "apiSpecs": contract["apiSpecs"],
+            "requirements": enriched_contract["requirements"],
+            "apiSpecs": enriched_contract["apiSpecs"],
         },
     }
 
@@ -314,7 +349,11 @@ def infer_contract_required(contract: dict[str, Any], story: dict[str, Any] | No
     return "No"
 
 
-def infer_contract_readiness(contract_required: str, contract: dict[str, Any]) -> str:
+def infer_contract_readiness(
+    contract_required: str,
+    contract: dict[str, Any],
+    story: dict[str, Any] | None = None,
+) -> str:
     if contract_required == "No":
         return "Not Required"
     specs = contract["apiSpecs"]
@@ -323,9 +362,23 @@ def infer_contract_readiness(contract_required: str, contract: dict[str, Any]) -
     if any(not spec.get("endpoints") or not spec.get("lifecycle") for spec in specs):
         return "Blocked"
     lifecycles = {spec.get("lifecycle") for spec in specs}
-    if lifecycles <= {"accepted"}:
-        return "Ready"
     if lifecycles & {"draft", "review"}:
+        return "Draft"
+    evaluations = [spec_readiness_evaluation(spec, story) for spec in specs]
+    if any(item["blocked"] for item in evaluations):
+        return "Blocked"
+    backend_ready = all(item["backendReady"] for item in evaluations)
+    frontend_ready = all(item["frontendReady"] for item in evaluations)
+    frontend_excluded = frontend_scope_excluded(story) or any(item["frontendExcluded"] for item in evaluations)
+    if backend_ready and frontend_ready and not frontend_excluded:
+        return "Ready"
+    if backend_ready and not frontend_ready:
+        return "Backend Ready"
+    if backend_ready and frontend_excluded:
+        return "Backend Ready"
+    if frontend_ready and not backend_ready:
+        return "Frontend Ready"
+    if lifecycles <= {"accepted"}:
         return "Draft"
     return "Blocked"
 
@@ -338,6 +391,8 @@ def infer_implementation_target(
     text = story_text(story)
     if "요구사항 정리" in text or "requirements clarification" in text.lower():
         return "Product"
+    if frontend_scope_excluded(story) and (contract_required == "Yes" or contract["apiSpecs"]):
+        return "Backend"
     if contract_required == "Yes" or contract["apiSpecs"]:
         return "Backend+Frontend"
     if "QA" in text and "Backend" not in text and "Frontend" not in text:
@@ -349,6 +404,115 @@ def story_text(story: dict[str, Any] | None) -> str:
     if not story:
         return ""
     return f"{story.get('title') or ''}\n{story.get('body') or ''}"
+
+
+def enrich_specs_with_readiness(
+    conn: sqlite3.Connection,
+    specs: list[dict[str, Any]],
+    story: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for spec in specs:
+        content = snapshot(conn, str(spec.get("path") or ""))
+        parsed = parse_api_spec_json(content) if content else {}
+        evaluation = spec_readiness_evaluation({**spec, "spec": parsed}, story)
+        enriched.append({**spec, "readinessEvidence": evaluation})
+    return enriched
+
+
+def parse_api_spec_json(content: str | None) -> dict[str, Any]:
+    if not content:
+        return {}
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def spec_readiness_evaluation(spec: dict[str, Any], story: dict[str, Any] | None) -> dict[str, Any]:
+    existing = spec.get("readinessEvidence")
+    if isinstance(existing, dict):
+        return existing
+    parsed = spec.get("spec") if isinstance(spec.get("spec"), dict) else {}
+    endpoints = parsed.get("endpoints") if isinstance(parsed, dict) else None
+    endpoint_list = endpoints if isinstance(endpoints, list) else spec.get("endpoints") or []
+    response_codes = parsed.get("responseCodes") if isinstance(parsed, dict) else []
+    error_codes = parsed.get("errorCodes") if isinstance(parsed, dict) else []
+    validation = parsed.get("validationChecks") if isinstance(parsed, dict) else {}
+
+    provider_checks = validation.get("provider") if isinstance(validation, dict) else []
+    consumer_checks = validation.get("consumer") if isinstance(validation, dict) else []
+    qa_checks = validation.get("qa") if isinstance(validation, dict) else []
+    endpoint_details = [item for item in endpoint_list if isinstance(item, dict)]
+
+    backend_ready = bool(endpoint_details) and all(
+        has_endpoint_provider_shape(item) for item in endpoint_details
+    ) and bool(response_codes) and bool(error_codes) and bool(provider_checks)
+
+    consumer_guidance_count = sum(1 for item in endpoint_details if item.get("consumerGuidance"))
+    frontend_excluded = frontend_scope_excluded(story) or excluded_consumer_checks(consumer_checks)
+    frontend_ready = (
+        bool(endpoint_details)
+        and all(has_endpoint_consumer_shape(item) for item in endpoint_details)
+        and consumer_guidance_count == len(endpoint_details)
+        and bool(consumer_checks)
+        and not frontend_excluded
+    )
+    qa_ready = bool(qa_checks)
+    blocked = not endpoint_details
+    return {
+        "backendReady": backend_ready,
+        "frontendReady": frontend_ready,
+        "qaReady": qa_ready,
+        "frontendExcluded": frontend_excluded,
+        "blocked": blocked,
+        "consumerGuidanceEndpoints": consumer_guidance_count,
+        "endpointCount": len(endpoint_details),
+        "notes": readiness_notes(backend_ready, frontend_ready, qa_ready, frontend_excluded),
+    }
+
+
+def has_endpoint_provider_shape(endpoint: dict[str, Any]) -> bool:
+    request = endpoint.get("request")
+    response = endpoint.get("response")
+    return all(endpoint.get(key) for key in ["id", "method", "path"]) and isinstance(request, dict) and isinstance(response, dict)
+
+
+def has_endpoint_consumer_shape(endpoint: dict[str, Any]) -> bool:
+    response = endpoint.get("response")
+    if not isinstance(response, dict):
+        return False
+    return bool(response.get("bodySchema") is not None or response.get("example") is not None)
+
+
+def frontend_scope_excluded(story: dict[str, Any] | None) -> bool:
+    text = story_text(story)
+    return bool(re.search(r"Frontend\s*\n\s*-\s*\[[ xX]\]\s*이번 Sprint 범위 제외", text))
+
+
+def excluded_consumer_checks(checks: Any) -> bool:
+    if not isinstance(checks, list):
+        return False
+    return any(isinstance(item, str) and "이번 Sprint 범위 제외" in item for item in checks)
+
+
+def readiness_notes(
+    backend_ready: bool,
+    frontend_ready: bool,
+    qa_ready: bool,
+    frontend_excluded: bool,
+) -> list[str]:
+    notes: list[str] = []
+    if backend_ready:
+        notes.append("Backend implementation has method/path/request/response/error/test evidence.")
+    if frontend_ready:
+        notes.append("Frontend implementation has response/example/consumer guidance evidence.")
+    if frontend_excluded:
+        notes.append("Frontend scope is explicitly excluded for this Story or spec.")
+    if qa_ready:
+        notes.append("QA checks are present.")
+    return notes
 
 
 def minimal_story(story: dict[str, Any] | None) -> dict[str, Any] | None:

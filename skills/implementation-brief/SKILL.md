@@ -32,6 +32,13 @@ When the LoaRing Product Ops MCP tools are available, start with:
 
 Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
 
+Interpret `Contract Readiness` strictly:
+
+- `Backend Ready` allows backend/provider implementation only.
+- `Frontend Ready` allows frontend/consumer implementation only.
+- `Ready` allows both backend and frontend implementation.
+- `Missing`, `Draft`, and `Blocked` do not allow implementation-ready briefs unless the user explicitly accepts the gap.
+
 ## Provider Brief
 
 Include only:

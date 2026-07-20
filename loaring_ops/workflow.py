@@ -161,17 +161,27 @@ def cached_story_and_project(
 def next_actions(status: str | None, readiness: str, target: str, has_spec: bool) -> list[str]:
     actions: list[str] = []
     if readiness == "Missing":
-        actions.append("Run api-contract for a contract brief or full api-spec decision before provider/consumer implementation.")
+        actions.append("Run api-contract for a contract brief or full api-spec decision before backend/frontend implementation.")
     elif readiness == "Draft":
         actions.append("Review and accept the API contract before implementation branches start.")
+    elif readiness == "Backend Ready":
+        actions.append("Backend implementation can start; frontend implementation still needs consumer-facing contract evidence.")
+    elif readiness == "Frontend Ready":
+        actions.append("Frontend implementation can start; backend implementation still needs provider-facing contract evidence.")
     elif readiness == "Ready":
-        actions.append("Implementation can start from the accepted product API contract.")
+        actions.append("Backend and frontend implementation can start from the accepted product API contract.")
     elif readiness == "Not Required":
         actions.append("No API contract gate is required; proceed with the product or QA task.")
 
     if target == "Backend+Frontend":
-        if has_spec:
+        if readiness == "Ready":
             actions.append("Prepare backend and frontend branches from the Story number.")
+        elif readiness == "Backend Ready":
+            actions.append("Prepare the backend branch and keep frontend blocked until Frontend Ready or Ready.")
+        elif readiness == "Frontend Ready":
+            actions.append("Prepare the frontend branch and keep backend blocked until Backend Ready or Ready.")
+        elif has_spec:
+            actions.append("Keep implementation limited to the side that is readiness-approved.")
         else:
             actions.append("Keep backend/frontend implementation blocked until the contract is linked.")
     elif target == "Backend":
@@ -200,11 +210,11 @@ def branch_suggestions(
 ) -> list[dict[str, str]]:
     slug = normalize_slug(infer_slug(story, None, story_issue))
     suggestions: list[dict[str, str]] = []
-    if readiness in {"Missing", "Draft"}:
+    if readiness in {"Missing", "Draft", "Blocked"}:
         suggestions.append({"target": "contract", "branch": branch_name(story_issue, "contract", slug)})
-    if target in {"Backend", "Backend+Frontend"} and readiness == "Ready":
+    if target in {"Backend", "Backend+Frontend"} and readiness in {"Backend Ready", "Ready"}:
         suggestions.append({"target": "backend", "branch": branch_name(story_issue, "backend", slug)})
-    if target in {"Frontend", "Backend+Frontend"} and readiness == "Ready":
+    if target in {"Frontend", "Backend+Frontend"} and readiness in {"Frontend Ready", "Ready"}:
         suggestions.append({"target": "frontend", "branch": branch_name(story_issue, "frontend", slug)})
     if target == "Product":
         suggestions.append({"target": "product", "branch": branch_name(story_issue, "product", slug)})
@@ -236,17 +246,17 @@ def workflow_findings(
     status = fields.get("Status")
     readiness = fields.get("Contract Readiness")
     target = fields.get("Implementation Target")
-    if status in {"In Progress", "In Request", "Done"} and readiness == "Missing" and target != "Product":
+    if status in {"In Progress", "In Request", "Done"} and readiness in {"Missing", "Draft", "Blocked"} and target != "Product":
         findings.append(
             finding(
                 issue_number,
                 "error",
                 "Contract Readiness",
                 "implementation-without-contract",
-                "Implementation status is active but API contract is missing.",
+                "Implementation status is active but API contract is not side-ready.",
             )
         )
-    if status == "Done" and readiness in {"Missing", "Blocked", "Draft"} and fields.get("Contract Required") == "Yes":
+    if status == "Done" and readiness != "Ready" and fields.get("Contract Required") == "Yes":
         findings.append(
             finding(
                 issue_number,
