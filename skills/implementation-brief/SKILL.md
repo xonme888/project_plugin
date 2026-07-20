@@ -27,6 +27,8 @@ When the LoaRing Product Ops MCP tools are available, start with:
 - `loaring_validate_contract_readiness` before producing provider or consumer briefs for API work
 - `loaring_get_contract` to retrieve linked API contract metadata
 - `loaring_infer_project_fields` to verify contract fields and implementation target
+- `loaring_plan_story_work` to decide whether implementation can start and which branch target applies
+- `loaring_prepare_branch` to produce the standard branch name when the user asks for branch preparation
 
 Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
 

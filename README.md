@@ -73,12 +73,29 @@ python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
 - `loaring_get_story`: Story Issue와 Project 필드값 조회
 - `loaring_find_cached_stories`: 캐시된 Story Issue 제목/본문 검색
 - `loaring_migration_dry_run`: legacy Story Issue를 `loaring-product`로 옮기기 전 read-only 마이그레이션 계획 생성
+- `loaring_plan_story_work`: Story의 Status, 계약 상태, target을 기준으로 다음 액션과 브랜치 후보 계산
+- `loaring_prepare_branch`: Story 번호와 target으로 표준 브랜치명과 git 명령 생성
+- `loaring_validate_workflow`: Project Story들의 필드 누락, 계약 상태 불일치, Status 리스크 점검
 
 GitHub 동기화는 read-only다. Issue comment 작성, PR 생성, Project 필드 수정은 다음 단계의 승인 기반 write action으로 분리한다.
 
 GitHub Project v2 필드 조회에는 `gh` 토큰의 `read:project` scope가 필요하다. 해당 scope가 없으면 Project 동기화는 실패로 중단하지 않고 `blocked` 상태와 필요한 scope를 반환한다.
 
 Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loaring-product`를 조회한다. 과거 Story가 `loaring-story/loaring-sotry`에 남아 있는 경우 `--include-legacy` 또는 MCP `includeLegacy: true`로 legacy repo를 read-only 보강 조회할 수 있다. 새 Story, 새 계약, Project 운영의 기준은 `loaring-product`다.
+
+## Workflow 도구
+
+표준 브랜치 규칙:
+
+- Product/API 계약: `docs/{story-id}-{slug}-contract`
+- Backend: `be/{story-id}-{slug}`
+- Frontend: `fe/{story-id}-{slug}`
+- Fix: `fix/{issue-id}-{slug}`
+- 일반 문서/운영: `docs/{slug}` 또는 `chore/{slug}`
+
+`loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Ready`인 Story는 provider/consumer 브랜치 후보를 반환한다.
+
+`loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다.
 
 마이그레이션 전에는 먼저 드라이런 리포트를 만든다.
 

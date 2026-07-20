@@ -26,6 +26,7 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 - `loaring_find_story` and `loaring_find_cached_stories` to check duplicate or related value
 - `loaring_get_story` to inspect an existing Story and Project fields
 - `loaring_infer_project_fields` to check `Contract Required`, `Contract Readiness`, and `Implementation Target`
+- `loaring_validate_workflow` to audit Sprint or Project readiness after Story fields are set
 
 The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
 

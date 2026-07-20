@@ -27,6 +27,11 @@ from loaring_ops.github_sync import (  # noqa: E402
     sync_stories,
 )
 from loaring_ops.migration import migration_dry_run  # noqa: E402
+from loaring_ops.workflow import (  # noqa: E402
+    plan_story_work,
+    prepare_branch,
+    validate_workflow,
+)
 
 
 JsonDict = dict[str, Any]
@@ -167,6 +172,46 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "loaring_plan_story_work": {
+        "description": "Plan the next workflow actions and branch suggestions for one cached Story.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_prepare_branch": {
+        "description": "Generate the expected branch name and git commands for a Story target.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "One of product, contract, backend, frontend, fix, docs, chore."},
+                "slug": {"type": "string"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue", "target"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_validate_workflow": {
+        "description": "Validate cached Project Stories for missing fields, contract/status mismatches, and workflow risks.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+                "sprint": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -260,6 +305,23 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
             sync=bool(args.get("sync", True)),
             include_bodies=bool(args.get("includeBodies")),
             issue_numbers=args.get("issueNumbers"),
+        ),
+        "loaring_plan_story_work": lambda args: plan_story_work(
+            story_issue=int(args["storyIssue"]),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_prepare_branch": lambda args: prepare_branch(
+            story_issue=int(args["storyIssue"]),
+            target=args["target"],
+            slug=args.get("slug"),
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+        ),
+        "loaring_validate_workflow": lambda args: validate_workflow(
+            repo=args.get("repo"),
+            number=args.get("projectNumber"),
+            sprint=args.get("sprint"),
         ),
     }
     if name not in handlers:
