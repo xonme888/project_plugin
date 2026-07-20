@@ -1,25 +1,23 @@
 {
   "name": "loaring-product-ops",
   "version": "0.1.0",
-  "description": "Codex plugin for LoaRing product operations, Story intake, requirement analysis, API contract changes, and GitHub Project checks.",
+  "description": "Codex plugin for LoaRing product operations: Story intake, requirement analysis, API contracts, and implementation briefs.",
   "author": {
     "name": "LoaRing"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "LoaRing Product Ops",
-    "shortDescription": "Manage LoaRing Story, requirements, API contracts, and Project workflow.",
-    "longDescription": "LoaRing Product Ops helps Codex work against the product source of truth without embedding product rules inside backend or frontend repositories.",
+    "shortDescription": "Work with LoaRing Stories, requirements, API contracts, and implementation briefs.",
+    "longDescription": "LoaRing Product Ops helps Codex read the product source of truth from loaring-product and turn it into Story drafts, requirement analysis, API contract updates, and role-specific implementation briefs without coupling backend and frontend repositories.",
     "developerName": "LoaRing",
     "category": "Productivity",
     "capabilities": [
       "Story intake",
       "Requirement analysis",
-      "API contract change classification",
-      "Contract registry lookup",
-      "Shared contract rules",
-      "GitHub Project readiness checks"
+      "API contract management",
+      "Implementation briefs"
     ],
-    "defaultPrompt": "Use LoaRing Product Ops to inspect the product Story, requirements, API contract, and GitHub Project workflow before implementation."
+    "defaultPrompt": "Use LoaRing Product Ops to inspect product Stories, requirements, API contracts, and implementation boundaries before changing backend or frontend code."
   }
 }
