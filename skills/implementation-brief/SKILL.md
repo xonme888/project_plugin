@@ -45,6 +45,12 @@ Interpret `Contract Readiness` strictly:
 
 Use `loaring_apply_workflow_transition` before implementation state changes. `start-backend` requires `Backend Ready` or `Ready`; `start-frontend` requires `Frontend Ready` or `Ready`; `request-review` is blocked while readiness is `Missing`, `Draft`, or `Blocked`.
 
+## Access Guardrails
+
+Use the listed sources only when they are directly needed for the current user request. Do not broaden lookup to unrelated repositories, GitHub records, personal apps, calendars, mail, drives, or team messages based only on possible usefulness.
+
+Limit lookup to the requested Story, requirement, API spec, repo/ref, Project field, assignee, sprint, or file path. If the needed scope is unclear or may include sensitive data, ask before lookup.
+
 ## Provider Brief
 
 Include only:

@@ -33,6 +33,12 @@ When the LoaRing Product Ops MCP tools are available, prefer them for lookup:
 
 The local sqlite cache is not source of truth. Treat it as a read-through cache of `loaring-product` and GitHub.
 
+## Access Guardrails
+
+Use the listed sources only when they are directly needed for the current user request. Do not broaden lookup to unrelated repositories, GitHub records, personal apps, calendars, mail, drives, or team messages based only on possible usefulness.
+
+Limit lookup to the requested Story, requirement, API spec, repo/ref, Project field, assignee, sprint, or file path. If the needed scope is unclear or may include sensitive data, ask before lookup.
+
 ## Classification
 
 | Situation | Result |

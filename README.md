@@ -122,6 +122,10 @@ uv sync
 ## 사용 원칙
 
 - `loaring-product`가 Story, 요구사항, API 계약의 단일 원본이다.
+- 기본값은 조회하지 않는 것이다. Codex는 현재 사용자 요청을 수행하는 데 직접 필요한 LoaRing product/source만 최소 범위로 조회한다.
+- 외부 앱, 개인 데이터, 조직 커뮤니케이션, 관련 없는 저장소, 메일, 캘린더, 드라이브, Slack/Teams, GitHub Issue/PR/Project는 사용자가 명시적으로 요청했거나 현재 작업에 직접 필요한 경우에만 조회한다.
+- 한 데이터 소스에서 얻은 단서를 이유로 다른 데이터 소스를 자동 조회하지 않는다. 교차 조회가 필요하면 사용자 요청 또는 명확한 작업 의존성이 있어야 한다.
+- 조회 범위는 요청된 Story, requirement, API spec, Project field, repo/ref, 파일, 기간, 담당자로 제한한다. 범위가 불명확하거나 민감 정보가 포함될 수 있으면 조회 전에 확인한다.
 - 구현 저장소는 product 문서를 vendoring하지 않는다.
 - Backend와 frontend는 서로의 저장소를 직접 읽거나 수정하지 않는다.
 - 구현 중 계약 변경이 필요하면 product Story 또는 product PR에 질문/결정 이력을 남긴다.
@@ -143,6 +147,8 @@ uv run python scripts/fetch_product_contract.py --ref docs/123-auth-contract
 ## MCP와 로컬 캐시
 
 패키징된 플러그인은 FastMCP 기반 MCP 서버를 통해 `loaring-product` 조회를 캡슐화한다. Backend나 frontend 저장소에서 플러그인을 실행하는 사용자는 product 저장소 구조를 직접 알 필요 없이 Story/API 계약 메타데이터를 조회할 수 있다.
+
+캡슐화된 MCP 조회도 목적 제한과 최소 범위를 따른다. Sprint, assignee, GitHub Project, contract gap처럼 넓은 조회 도구는 사용자가 해당 범위를 요청했거나 현재 작업의 직접 의존성이 있을 때만 사용한다.
 
 로컬 sqlite 캐시는 기본적으로 `~/.codex/plugin-sources/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
 
