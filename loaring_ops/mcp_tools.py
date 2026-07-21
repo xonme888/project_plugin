@@ -95,6 +95,7 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             repo=args.get("repo"),
             number=args.get("projectNumber"),
             sprint=args.get("sprint"),
+            assignee=args.get("assignee"),
         ),
         "loaring_update_project_fields": lambda args: update_project_fields(
             story_issue=int(args["storyIssue"]),
@@ -148,11 +149,13 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             repo=args.get("repo"),
             number=args.get("projectNumber"),
             sprint=args.get("sprint"),
+            assignee=args.get("assignee"),
         ),
         "loaring_contract_gap_report": lambda args: contract_gap_report(
             repo=args.get("repo"),
             number=args.get("projectNumber"),
             sprint=args.get("sprint"),
+            assignee=args.get("assignee"),
         ),
         "loaring_create_api_contract_issue_comment": lambda args: create_api_contract_issue_comment(
             story_issue=int(args["storyIssue"]),

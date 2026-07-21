@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from typing import Any
 
 from .config import project_number, story_repo_name
@@ -61,6 +62,20 @@ query($owner: String!, $number: Int!) {
             id
             name
             dataType
+            configuration {
+              iterations {
+                id
+                title
+                startDate
+                duration
+              }
+              completedIterations {
+                id
+                title
+                startDate
+                duration
+              }
+            }
           }
         }
       }
@@ -236,6 +251,53 @@ def get_project_metadata(repo: str, number: int) -> dict[str, Any]:
         name = canonical_project_field_name(str(node["name"]))
         fields[name] = {**node, "name": name}
     return {"projectId": project["id"], "fields": fields}
+
+
+def current_project_iteration(
+    repo: str,
+    number: int,
+    field_name: str = "Sprint",
+    today: date | None = None,
+) -> dict[str, Any] | None:
+    """Return the Project iteration whose configured date range contains today."""
+    metadata = get_project_metadata(repo, number)
+    field = metadata["fields"].get(canonical_project_field_name(field_name))
+    if not field:
+        return None
+    return current_iteration_from_field(field, today=today)
+
+
+def current_iteration_from_field(field: dict[str, Any], today: date | None = None) -> dict[str, Any] | None:
+    target_date = today or date.today()
+    configuration = field.get("configuration") or {}
+    iterations = [
+        *(configuration.get("iterations") or []),
+        *(configuration.get("completedIterations") or []),
+    ]
+    for iteration in iterations:
+        start = parse_date(iteration.get("startDate"))
+        duration = int(iteration.get("duration") or 0)
+        if not start or duration <= 0:
+            continue
+        end = start + timedelta(days=duration)
+        if start <= target_date < end:
+            return {
+                "id": iteration.get("id"),
+                "title": iteration.get("title"),
+                "startDate": start.isoformat(),
+                "duration": duration,
+                "endDate": end.isoformat(),
+            }
+    return None
+
+
+def parse_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def cached_project_item_id(repo: str, number: int, story_issue: int) -> str:

@@ -11,7 +11,7 @@ from .config import project_number, story_repo_name
 from .db import connect, init_db
 from .github_client import gh_api, gh_api_post
 from .github_sync import decode_project, decode_story
-from .github_project import STATUS_TRANSITIONS, require_confirm, update_project_fields
+from .github_project import STATUS_TRANSITIONS, current_project_iteration, require_confirm, update_project_fields
 from .product_sync import get_contract, infer_project_fields
 
 
@@ -261,9 +261,15 @@ def validate_workflow(
     repo: str | None = None,
     number: int | None = None,
     sprint: str | None = None,
+    assignee: str | None = None,
 ) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
     selected_project = project_number(number)
+    resolved_sprint = sprint
+    current_sprint = None
+    if resolved_sprint is None:
+        current_sprint = current_project_iteration(selected_repo, selected_project)
+        resolved_sprint = (current_sprint or {}).get("title")
     conn = connect()
     init_db(conn)
     rows = conn.execute(
@@ -285,7 +291,9 @@ def validate_workflow(
     for row in rows:
         story = decode_story(row)
         fields = json.loads(row["fields_json"] or "{}")
-        if sprint and fields.get("Sprint") != sprint:
+        if resolved_sprint and fields.get("Sprint") != resolved_sprint:
+            continue
+        if assignee and assignee not in set(story.get("assignees") or []):
             continue
         issue_number = int(row["issue_number"])
         inference = infer_project_fields(story_issue=issue_number, repo=selected_repo, number=selected_project)
@@ -307,7 +315,9 @@ def validate_workflow(
     return {
         "repo": selected_repo,
         "projectNumber": selected_project,
-        "sprint": sprint,
+        "sprint": resolved_sprint,
+        "currentSprint": current_sprint,
+        "assignee": assignee,
         "storyCount": len(stories),
         "findingCount": len(findings),
         "findings": findings,
@@ -319,8 +329,9 @@ def sprint_report(
     repo: str | None = None,
     number: int | None = None,
     sprint: str | None = None,
+    assignee: str | None = None,
 ) -> dict[str, Any]:
-    validation = validate_workflow(repo=repo, number=number, sprint=sprint)
+    validation = validate_workflow(repo=repo, number=number, sprint=sprint, assignee=assignee)
     summary: dict[str, dict[str, int]] = {
         "byStatus": {},
         "byReadiness": {},
@@ -343,7 +354,9 @@ def sprint_report(
     return {
         "repo": validation["repo"],
         "projectNumber": validation["projectNumber"],
-        "sprint": sprint,
+        "sprint": validation["sprint"],
+        "currentSprint": validation["currentSprint"],
+        "assignee": validation["assignee"],
         "storyCount": validation["storyCount"],
         "summary": summary,
         "blockerCount": len(blockers),
@@ -355,8 +368,9 @@ def contract_gap_report(
     repo: str | None = None,
     number: int | None = None,
     sprint: str | None = None,
+    assignee: str | None = None,
 ) -> dict[str, Any]:
-    validation = validate_workflow(repo=repo, number=number, sprint=sprint)
+    validation = validate_workflow(repo=repo, number=number, sprint=sprint, assignee=assignee)
     gaps: list[dict[str, Any]] = []
     for story in validation["stories"]:
         fields = story["fields"]
@@ -377,7 +391,9 @@ def contract_gap_report(
     return {
         "repo": validation["repo"],
         "projectNumber": validation["projectNumber"],
-        "sprint": sprint,
+        "sprint": validation["sprint"],
+        "currentSprint": validation["currentSprint"],
+        "assignee": validation["assignee"],
         "gapCount": len(gaps),
         "gaps": gaps,
     }

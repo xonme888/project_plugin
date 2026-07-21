@@ -169,13 +169,14 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
     },
     "loaring_validate_workflow": {
-        "description": "Validate cached Project Stories for missing fields, contract/status mismatches, and workflow risks.",
+        "description": "Validate cached Project Stories for missing fields, contract/status mismatches, and workflow risks. Defaults to the current GitHub Project Sprint when sprint is omitted.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
                 "projectNumber": {"type": "integer"},
                 "sprint": {"type": "string"},
+                "assignee": {"type": "string", "description": "GitHub login to filter Story assignees."},
             },
             "additionalProperties": False,
         },
@@ -279,25 +280,27 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
     },
     "loaring_sprint_report": {
-        "description": "Summarize Sprint Stories by Status, Contract Readiness, Implementation Target, and blockers.",
+        "description": "Summarize Sprint Stories by Status, Contract Readiness, Implementation Target, and blockers. Defaults to the current GitHub Project Sprint when sprint is omitted.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
                 "projectNumber": {"type": "integer"},
                 "sprint": {"type": "string"},
+                "assignee": {"type": "string", "description": "GitHub login to filter Story assignees."},
             },
             "additionalProperties": False,
         },
     },
     "loaring_contract_gap_report": {
-        "description": "List Stories whose API contract is required but Missing, Draft, or Blocked.",
+        "description": "List Stories whose API contract is required but Missing, Draft, or Blocked. Defaults to the current GitHub Project Sprint when sprint is omitted.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
                 "projectNumber": {"type": "integer"},
                 "sprint": {"type": "string"},
+                "assignee": {"type": "string", "description": "GitHub login to filter Story assignees."},
             },
             "additionalProperties": False,
         },

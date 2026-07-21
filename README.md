@@ -139,7 +139,7 @@ MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Proje
 - `loaring_migration_dry_run`: legacy Story Issue를 `loaring-product`로 옮기기 전 read-only 마이그레이션 계획 생성
 - `loaring_plan_story_work`: Story의 Status, 계약 상태, target을 기준으로 다음 액션과 브랜치 후보 계산
 - `loaring_prepare_branch`: Story 번호와 target으로 표준 브랜치명과 git 명령 생성
-- `loaring_validate_workflow`: Project Story들의 필드 누락, 계약 상태 불일치, Status 리스크 점검
+- `loaring_validate_workflow`: Project Story들의 필드 누락, 계약 상태 불일치, Status 리스크 점검. `sprint`를 생략하면 GitHub Project의 현재 Sprint iteration을 기준으로 조회하고, `assignee`로 GitHub login 담당자 필터를 걸 수 있다.
 - `loaring_update_project_fields`: MCP 추론값이나 명시 필드값을 GitHub Project에 반영할 변경 계획 생성 또는 승인 기반 적용
 - `loaring_sync_contract_readiness_options`: Project의 `Contract Readiness` 옵션을 표준값과 비교하고 승인 시 보정
 - `loaring_apply_workflow_transition`: 계약 gate를 확인한 뒤 `Status` 전이 계획 생성 또는 승인 기반 적용
@@ -147,8 +147,8 @@ MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Proje
 - `loaring_validate_branch_name`: 현재 또는 지정된 브랜치명이 Story/target 규칙과 맞는지 검사
 - `loaring_prepare_pr`: Story, target, 계약 상태 기준으로 PR 제목/본문 초안 생성
 - `loaring_link_pr_to_project`: PR 본문에 `Related #...` 연결이 있는지 확인하고 승인 시 Story를 `In Request`로 전이
-- `loaring_sprint_report`: Sprint별 Status, readiness, target, blocker 요약
-- `loaring_contract_gap_report`: `Contract Required=Yes`인데 readiness가 `Missing`, `Draft`, `Blocked`인 Story 목록
+- `loaring_sprint_report`: Sprint별 Status, readiness, target, blocker 요약. `sprint`를 생략하면 GitHub Project의 현재 Sprint iteration을 기준으로 조회하고, `assignee`로 GitHub login 담당자 필터를 걸 수 있다.
+- `loaring_contract_gap_report`: `Contract Required=Yes`인데 readiness가 `Missing`, `Draft`, `Blocked`인 Story 목록. `sprint` 생략 시 현재 Project Sprint, `assignee` 지정 시 해당 담당자 Story만 조회한다.
 - `loaring_create_api_contract_issue_comment`: `[계약 질문]`, `[계약 결정]` 댓글 본문 생성 또는 승인 기반 게시
 
 PR 생성 자체는 아직 수행하지 않는다. `loaring_prepare_pr`은 제목/본문 초안을 만들고, 실제 PR 생성은 별도 승인 기반 GitHub 작업으로 둔다.
@@ -169,7 +169,7 @@ Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loari
 
 `loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Backend Ready`인 Story는 backend 브랜치만, `Frontend Ready`인 Story는 frontend 브랜치만, `Ready`인 Story는 양쪽 브랜치 후보를 반환한다.
 
-`loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다.
+`loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다. `sprint`를 넘기지 않으면 GitHub Project의 `Sprint` iteration 설정에서 현재 날짜가 포함된 iteration title을 계산해 그 Sprint만 조회한다. `assignee: "github-login"`을 함께 넘기면 해당 담당자 Story만 남긴다.
 
 Status 전이 규칙:
 
