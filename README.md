@@ -31,16 +31,20 @@ loaring-frontend
 - project metadata의 `requires-python = ">=3.11,<3.12"`
 - MCP runtime dependency는 `uv sync`로 설치한다.
 
-팀원 배포는 team marketplace를 기본으로 한다. 별도 marketplace 저장소에서 다음 구조를 사용한다.
+팀원 배포는 이 저장소를 team marketplace root로 등록하는 방식을 기본으로 한다.
 
 ```txt
-loaring-codex-marketplace/
-  marketplace.json
-  plugins/
-    loaring-product-ops/
+project_plugin/
+  .agents/
+    plugins/
+      marketplace.json
+  .codex-plugin/
+    plugin.json
+  skills/
+  mcp/
 ```
 
-`marketplace.json` 예시:
+`.agents/plugins/marketplace.json`:
 
 ```json
 {
@@ -53,7 +57,7 @@ loaring-codex-marketplace/
       "name": "loaring-product-ops",
       "source": {
         "source": "local",
-        "path": "./plugins/loaring-product-ops"
+        "path": "."
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -68,13 +72,13 @@ loaring-codex-marketplace/
 팀원 설치:
 
 ```bash
-git clone https://github.com/xonme888/loaring-codex-marketplace.git
-cd loaring-codex-marketplace
+git clone https://github.com/xonme888/project_plugin.git
+cd project_plugin
 codex plugin marketplace add .
 codex plugin add loaring-product-ops@loaring
 ```
 
-플러그인 소스 검증 또는 로컬 MCP 실행 전에는 marketplace의 `plugins/loaring-product-ops` 경로에서 의존성을 맞춘다.
+플러그인 소스 검증 또는 로컬 MCP 실행 전에는 저장소 root에서 의존성을 맞춘다.
 
 ```bash
 uv sync
