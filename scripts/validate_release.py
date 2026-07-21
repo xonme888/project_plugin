@@ -51,6 +51,8 @@ def main() -> int:
     errors.extend(validate_python_policy())
     errors.extend(validate_dependencies())
     errors.extend(validate_manifest())
+    errors.extend(validate_skills())
+    errors.extend(validate_commit_message_policy())
     errors.extend(validate_mcp_tool_list())
     errors.extend(validate_no_secrets())
     errors.extend(validate_no_personal_paths())
@@ -126,6 +128,67 @@ def validate_manifest() -> list[str]:
         errors.append("plugin.json must not contain unsupported hooks.")
     errors.extend(validate_mcp_config())
     return errors
+
+
+def validate_skills() -> list[str]:
+    required_skills = {
+        "api-contract",
+        "commit-message",
+        "implementation-brief",
+        "requirement-analysis",
+        "story-intake",
+    }
+    skills_dir = ROOT / "skills"
+    errors: list[str] = []
+    for skill_name in sorted(required_skills):
+        skill_path = skills_dir / skill_name / "SKILL.md"
+        if not skill_path.is_file():
+            errors.append(f"Missing required skill: {skill_name}.")
+            continue
+        text = skill_path.read_text(encoding="utf-8")
+        if f"name: {skill_name}" not in text and f'name: "{skill_name}"' not in text:
+            errors.append(f"{skill_path.relative_to(ROOT)} must declare name: {skill_name}.")
+        if "description:" not in text:
+            errors.append(f"{skill_path.relative_to(ROOT)} must declare a description.")
+    return errors
+
+
+def validate_commit_message_policy() -> list[str]:
+    script = ROOT / "scripts" / "validate_commit_message.py"
+    if not script.is_file():
+        return ["Missing scripts/validate_commit_message.py."]
+
+    valid_messages = [
+        "docs(api): 회원가입 계약 준비 규칙 추가",
+        "feat(mcp): Story 워크플로 전이 검증 추가",
+        "chore(release): 번들 스킬 메타데이터 검증 추가",
+    ]
+    invalid_messages = [
+        "updated files",
+        "Fix stuff.",
+        "docs(api): add signup contract readiness rules",
+        "docs(api): 회원가입 계약 준비 규칙 추가.",
+    ]
+
+    errors: list[str] = []
+    for message in valid_messages:
+        result = run_commit_message_validator(script, message)
+        if result.returncode != 0:
+            errors.append(f"Valid commit message rejected: {message}")
+    for message in invalid_messages:
+        result = run_commit_message_validator(script, message)
+        if result.returncode == 0:
+            errors.append(f"Invalid commit message accepted: {message}")
+    return errors
+
+
+def run_commit_message_validator(script: Path, message: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(script), "--message", message],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
 
 
 def validate_mcp_config() -> list[str]:

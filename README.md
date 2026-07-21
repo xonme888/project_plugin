@@ -114,6 +114,7 @@ uv sync
 | `requirement-analysis` | 요구사항 분류, 기존 Story/API 중복 확인, API 영향 분석 |
 | `api-contract` | API spec 작성/변경, registry 조회, 공통 규칙, breaking change 판단 |
 | `implementation-brief` | product 계약을 provider/consumer/QA 작업 지시서로 변환 |
+| `commit-message` | LoaRing Conventional Commit 메시지 작성과 검증 |
 
 계약 조회, 공통 에러코드, 명명규칙, response envelope, 변경 분류는 별도 스킬로 노출하지 않고 `api-contract` 내부 절차로 처리한다.
 
