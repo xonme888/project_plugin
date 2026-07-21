@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Workflow"
+  short_description: "Stage, validate, commit, and push LoaRing repository changes safely."
+  default_prompt: "Use Git Workflow to inspect the repository state, separate user changes from Codex changes, run the right validation, write a Korean Conventional Commit message, and push only when requested."

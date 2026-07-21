@@ -134,6 +134,7 @@ def validate_skills() -> list[str]:
     required_skills = {
         "api-contract",
         "commit-message",
+        "git-workflow",
         "implementation-brief",
         "requirement-analysis",
         "story-intake",

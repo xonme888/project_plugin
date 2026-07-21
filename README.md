@@ -115,6 +115,7 @@ uv sync
 | `api-contract` | API spec 작성/변경, registry 조회, 공통 규칙, breaking change 판단 |
 | `implementation-brief` | product 계약을 provider/consumer/QA 작업 지시서로 변환 |
 | `commit-message` | LoaRing Conventional Commit 메시지 작성과 검증 |
+| `git-workflow` | Git 상태 확인, 검증, 커밋, 푸시 절차 안전장치 |
 
 계약 조회, 공통 에러코드, 명명규칙, response envelope, 변경 분류는 별도 스킬로 노출하지 않고 `api-contract` 내부 절차로 처리한다.
 
