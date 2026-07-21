@@ -77,7 +77,7 @@ project_plugin/
 curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh | bash
 ```
 
-기본 설치 위치는 `~/.codex/loaring-product-ops`다. 다른 위치가 필요하면 `LOARING_PRODUCT_OPS_DIR`를 지정한다.
+기본 설치 위치는 `~/.codex/plugin-sources/loaring-product-ops`다. 다른 위치가 필요하면 `LOARING_PRODUCT_OPS_DIR`를 지정한다.
 
 ```bash
 LOARING_PRODUCT_OPS_DIR="$HOME/dev/loaring-product-ops" bash -c "$(curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh)"
@@ -142,7 +142,7 @@ uv run python scripts/fetch_product_contract.py --ref docs/123-auth-contract
 
 패키징된 플러그인은 FastMCP 기반 MCP 서버를 통해 `loaring-product` 조회를 캡슐화한다. Backend나 frontend 저장소에서 플러그인을 실행하는 사용자는 product 저장소 구조를 직접 알 필요 없이 Story/API 계약 메타데이터를 조회할 수 있다.
 
-로컬 sqlite 캐시는 기본적으로 `~/.codex/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
+로컬 sqlite 캐시는 기본적으로 `~/.codex/plugin-sources/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
 
 MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Project 필드 수정, Issue comment 게시, 브랜치 생성처럼 외부 상태를 바꾸는 도구는 `apply=true`와 `confirm=true`가 모두 있어야 실행된다.
 
