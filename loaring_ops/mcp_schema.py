@@ -279,6 +279,48 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "loaring_prepare_doc_edit": {
+        "description": "Prepare the GitHub-first document edit workflow: branch, draft PR body, and Story Issue notification comment.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "docs or contract. Defaults to docs."},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "notifyUsers": {"type": "array", "items": {"type": "string"}, "description": "GitHub logins to @mention in the Story Issue comment."},
+                "slug": {"type": "string"},
+                "branch": {"type": "string"},
+                "prNumber": {"type": "integer"},
+                "prUrl": {"type": "string"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_announce_doc_edit": {
+        "description": "Post or preview the Story Issue comment that announces a GitHub document edit in progress. Writes require apply=true and confirm=true.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "docs or contract. Defaults to docs."},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "notifyUsers": {"type": "array", "items": {"type": "string"}, "description": "GitHub logins to @mention in the Story Issue comment."},
+                "slug": {"type": "string"},
+                "branch": {"type": "string"},
+                "prNumber": {"type": "integer"},
+                "prUrl": {"type": "string"},
+                "apply": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "projectNumber": {"type": "integer"},
+            },
+            "required": ["storyIssue"],
+            "additionalProperties": False,
+        },
+    },
     "loaring_sprint_report": {
         "description": "Summarize Sprint Stories by Status, Contract Readiness, Implementation Target, and blockers. Defaults to the current GitHub Project Sprint when sprint is omitted.",
         "inputSchema": {

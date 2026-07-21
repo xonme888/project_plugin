@@ -146,6 +146,8 @@ MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Proje
 - `loaring_create_work_branch`: 표준 Story 브랜치를 계획하거나 승인 시 `git switch -c` 실행
 - `loaring_validate_branch_name`: 현재 또는 지정된 브랜치명이 Story/target 규칙과 맞는지 검사
 - `loaring_prepare_pr`: Story, target, 계약 상태 기준으로 PR 제목/본문 초안 생성
+- `loaring_prepare_doc_edit`: GitHub 기준 문서 수정 워크플로에 필요한 브랜치, draft PR 본문, Story Issue 알림 댓글 초안 생성
+- `loaring_announce_doc_edit`: GitHub Story Issue에 문서 수정 시작 알림 댓글을 생성하거나 승인 기반 게시
 - `loaring_link_pr_to_project`: PR 본문에 `Related #...` 연결이 있는지 확인하고 승인 시 Story를 `In Request`로 전이
 - `loaring_sprint_report`: Sprint별 Status, readiness, target, blocker 요약. `sprint`를 생략하면 GitHub Project의 현재 Sprint iteration을 기준으로 조회하고, `assignee`로 GitHub login 담당자 필터를 걸 수 있다.
 - `loaring_contract_gap_report`: `Contract Required=Yes`인데 readiness가 `Missing`, `Draft`, `Blocked`인 Story 목록. `sprint` 생략 시 현재 Project Sprint, `assignee` 지정 시 해당 담당자 Story만 조회한다.
@@ -170,6 +172,8 @@ Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loari
 `loaring_plan_story_work`는 캐시된 Story, Project 필드, API 계약 연결을 함께 읽어 다음 액션을 계산한다. API 계약이 `Missing`인 Story는 backend/frontend 구현 시작 전 `api-contract`로 넘기고, `Backend Ready`인 Story는 backend 브랜치만, `Frontend Ready`인 Story는 frontend 브랜치만, `Ready`인 Story는 양쪽 브랜치 후보를 반환한다.
 
 `loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다. `sprint`를 넘기지 않으면 GitHub Project의 `Sprint` iteration 설정에서 현재 날짜가 포함된 iteration title을 계산해 그 Sprint만 조회한다. `assignee: "github-login"`을 함께 넘기면 해당 담당자 Story만 남긴다.
+
+문서 수정은 GitHub PR/Issue를 기본 알림 채널로 사용한다. `loaring_prepare_doc_edit`는 Story 기준 브랜치, draft PR 제목/본문, Story Issue 댓글 초안을 만들고, `loaring_announce_doc_edit`는 같은 댓글을 `apply=true`, `confirm=true`일 때만 GitHub Issue에 게시한다. 권장 순서는 develop 최신화, Story 기준 docs 브랜치 생성, draft PR 조기 생성, Story Issue 댓글로 관련자 `@mention`, review 전 같은 Story나 파일을 수정하는 열린 PR 확인이다.
 
 Status 전이 규칙:
 

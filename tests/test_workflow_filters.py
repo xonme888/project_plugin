@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from loaring_ops.db import connect, init_db
 from loaring_ops.github_project import current_iteration_from_field
-from loaring_ops.workflow import sprint_report, validate_workflow
+from loaring_ops.workflow import announce_doc_edit, prepare_doc_edit, sprint_report, validate_workflow
 
 
 class WorkflowFilterTests(unittest.TestCase):
@@ -80,6 +80,42 @@ class WorkflowFilterTests(unittest.TestCase):
         self.assertEqual(result["currentSprint"]["title"], "Sprint 2")
         self.assertEqual(result["assignee"], "octo")
         self.assertEqual(result["storyCount"], 1)
+
+    def test_prepare_doc_edit_returns_github_pr_and_issue_comment_drafts(self) -> None:
+        result = prepare_doc_edit(
+            story_issue=1,
+            target="contract",
+            files=["docs/api/auth.api-spec.json"],
+            notify_users=["@octo", "hubot", "octo"],
+            pr_number=7,
+        )
+
+        self.assertEqual(result["target"], "contract")
+        self.assertEqual(result["branch"], "docs/1-mine-current-ops-contract")
+        self.assertEqual(result["notifyUsers"], ["octo", "hubot"])
+        self.assertEqual(result["pr"]["url"], "https://github.com/loaring-story/loaring-product/pull/7")
+        self.assertIn("Related #1", result["pr"]["body"])
+        self.assertIn("@octo @hubot", result["storyComment"]["body"])
+        self.assertIn("docs/api/auth.api-spec.json", result["storyComment"]["body"])
+
+    @patch("loaring_ops.workflow.gh_api_post")
+    def test_announce_doc_edit_posts_story_issue_comment_when_confirmed(self, gh_api_post) -> None:
+        gh_api_post.return_value = {"id": 11, "html_url": "https://github.com/comment/11"}
+
+        result = announce_doc_edit(
+            story_issue=1,
+            files=["docs/requirements/story-map.md"],
+            notify_users=["octo"],
+            apply=True,
+            confirm=True,
+        )
+
+        self.assertEqual(result["status"], "posted")
+        self.assertEqual(result["comment"]["id"], 11)
+        gh_api_post.assert_called_once()
+        path, payload = gh_api_post.call_args.args
+        self.assertEqual(path, "repos/loaring-story/loaring-product/issues/1/comments")
+        self.assertIn("@octo", payload["body"])
 
     def _insert_story(self, conn, issue_number: int, title: str, assignees: list[str], sprint: str) -> None:
         conn.execute(

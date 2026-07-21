@@ -228,6 +228,118 @@ def prepare_pr(
     }
 
 
+def prepare_doc_edit(
+    story_issue: int,
+    target: str = "docs",
+    files: list[str] | None = None,
+    notify_users: list[str] | None = None,
+    slug: str | None = None,
+    branch: str | None = None,
+    pr_number: int | None = None,
+    pr_url: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
+    plan = prepare_branch(story_issue, target, slug=slug, repo=selected_repo, number=selected_project)
+    story = (plan["source"] or {}).get("story") or {}
+    selected_branch = branch or plan["branch"]
+    normalized_files = normalize_files(files)
+    normalized_notify_users = normalize_notify_users(notify_users)
+    resolved_pr_url = pr_url or (f"https://github.com/{selected_repo}/pull/{pr_number}" if pr_number else None)
+    title_target = "Contract" if plan["target"] == "contract" else "Docs"
+    story_title = story.get("title") or f"Story #{story_issue}"
+    pr_title = f"{title_target}: {story_title} (#{story_issue})"
+    pr_body = doc_edit_pr_body(story_issue, plan["target"], selected_branch, normalized_files)
+    comment_body = doc_edit_comment_body(
+        story_issue=story_issue,
+        title=story_title,
+        branch=selected_branch,
+        files=normalized_files,
+        notify_users=normalized_notify_users,
+        pr_url=resolved_pr_url,
+    )
+    return {
+        "repo": selected_repo,
+        "projectNumber": selected_project,
+        "storyIssue": story_issue,
+        "target": plan["target"],
+        "branch": selected_branch,
+        "commands": plan["commands"],
+        "files": normalized_files,
+        "notifyUsers": normalized_notify_users,
+        "pr": {
+            "number": pr_number,
+            "url": resolved_pr_url,
+            "title": pr_title,
+            "body": pr_body,
+            "draftRecommended": True,
+        },
+        "storyComment": {
+            "issueNumber": story_issue,
+            "body": comment_body,
+        },
+        "workflow": [
+            "Sync develop before editing product docs.",
+            "Create the Story-scoped docs branch.",
+            "Open a draft PR early so GitHub shows the document edit in progress.",
+            "Post the Story Issue comment to notify GitHub users and keep the audit trail near the Story.",
+            "Before review, re-check develop and open PRs that touch the same Story or files.",
+        ],
+        "story": story,
+        "projectFields": (plan["source"] or {}).get("projectFields", {}),
+    }
+
+
+def announce_doc_edit(
+    story_issue: int,
+    target: str = "docs",
+    files: list[str] | None = None,
+    notify_users: list[str] | None = None,
+    slug: str | None = None,
+    branch: str | None = None,
+    pr_number: int | None = None,
+    pr_url: str | None = None,
+    repo: str | None = None,
+    number: int | None = None,
+    apply: bool = False,  # noqa: A002 - MCP argument name
+    confirm: bool = False,
+) -> dict[str, Any]:
+    prepared = prepare_doc_edit(
+        story_issue=story_issue,
+        target=target,
+        files=files,
+        notify_users=notify_users,
+        slug=slug,
+        branch=branch,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        repo=repo,
+        number=number,
+    )
+    result: dict[str, Any] = {
+        **prepared,
+        "apply": apply,
+        "confirmed": confirm,
+    }
+    if not apply:
+        result["status"] = "planned"
+        result["message"] = "Set apply=true and confirm=true to post the Story Issue notification comment."
+        return result
+    require_confirm(confirm)
+    posted = gh_api_post(
+        f"repos/{prepared['repo']}/issues/{story_issue}/comments",
+        {"body": prepared["storyComment"]["body"]},
+    )
+    result["status"] = "posted"
+    result["comment"] = {
+        "id": posted.get("id"),
+        "url": posted.get("html_url"),
+    }
+    return result
+
+
 def plan_story_work(story_issue: int, repo: str | None = None, number: int | None = None) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
     selected_project = project_number(number)
@@ -608,6 +720,81 @@ def detect_related_story(body: str) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+def normalize_files(files: list[str] | None) -> list[str]:
+    if not files:
+        return []
+    return [item.strip() for item in files if isinstance(item, str) and item.strip()]
+
+
+def normalize_notify_users(users: list[str] | None) -> list[str]:
+    if not users:
+        return []
+    normalized: list[str] = []
+    for user in users:
+        login = user.strip().removeprefix("@")
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", login):
+            raise ValueError(f"Invalid GitHub login: {user}")
+        if login not in normalized:
+            normalized.append(login)
+    return normalized
+
+
+def doc_edit_pr_body(story_issue: int, target: str, branch: str, files: list[str]) -> str:
+    file_lines = [f"- `{path}`" for path in files] or ["- TBD"]
+    return "\n".join(
+        [
+            f"Related #{story_issue}",
+            "",
+            "## Scope",
+            f"- Target: {target}",
+            f"- Branch: `{branch}`",
+            "- Files:",
+            *file_lines,
+            "",
+            "## Coordination",
+            "- [ ] Draft PR opened before substantial document edits",
+            "- [ ] Story Issue notification posted",
+            "- [ ] Same Story/file open PRs checked before review",
+            "",
+            "## Checks",
+            "- [ ] Product docs reviewed against Story acceptance criteria",
+            "- [ ] API contract impact checked",
+            "- [ ] Traceability updated if requirements or API specs changed",
+        ]
+    )
+
+
+def doc_edit_comment_body(
+    story_issue: int,
+    title: str,
+    branch: str,
+    files: list[str],
+    notify_users: list[str],
+    pr_url: str | None,
+) -> str:
+    mentions = " ".join(f"@{user}" for user in notify_users)
+    file_lines = [f"- `{path}`" for path in files] or ["- TBD"]
+    pr_line = pr_url or "Draft PR URL pending"
+    lines = [
+        "[문서 수정 시작]",
+        "",
+    ]
+    if mentions:
+        lines.extend([mentions, ""])
+    lines.extend(
+        [
+            f"- Story: #{story_issue} {title}",
+            f"- Branch: `{branch}`",
+            f"- PR: {pr_line}",
+            "- Files:",
+            *file_lines,
+            "",
+            "같은 Story나 문서를 수정 중이면 이 Story/PR에서 먼저 조율해주세요.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def next_actions(status: str | None, readiness: str, target: str, has_spec: bool) -> list[str]:
