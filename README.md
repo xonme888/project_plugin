@@ -191,11 +191,14 @@ MCP 도구는 기본적으로 조회/계획을 먼저 반환한다. GitHub Proje
 - `loaring_prepare_doc_edit`: GitHub 기준 문서 수정 워크플로에 필요한 브랜치, draft PR 본문, Story Issue 알림 댓글 초안 생성
 - `loaring_announce_doc_edit`: GitHub Story Issue에 문서 수정 시작 알림 댓글을 생성하거나 승인 기반 게시
 - `loaring_link_pr_to_project`: PR 본문에 `Related #...` 연결이 있는지 확인하고 승인 시 Story를 `In Request`로 전이
+- `loaring_detect_work_conflicts`: 작업 시작 전 같은 Story 또는 문서 파일을 참조하는 열린 PR을 조회
 - `loaring_sprint_report`: Sprint별 Status, readiness, target, blocker 요약. `sprint`를 생략하면 GitHub Project의 현재 Sprint iteration을 기준으로 조회하고, `assignee`로 GitHub login 담당자 필터를 걸 수 있다.
 - `loaring_contract_gap_report`: `Contract Required=Yes`인데 readiness가 `Missing`, `Draft`, `Blocked`인 Story 목록. `sprint` 생략 시 현재 Project Sprint, `assignee` 지정 시 해당 담당자 Story만 조회한다.
 - `loaring_create_api_contract_issue_comment`: `[계약 질문]`, `[계약 결정]` 댓글 본문 생성 또는 승인 기반 게시
 
 PR 생성 자체는 아직 수행하지 않는다. `loaring_prepare_pr`은 제목/본문 초안을 만들고, 실제 PR 생성은 별도 승인 기반 GitHub 작업으로 둔다.
+
+BE/FE 구현 PR을 product Story에 연결할 때는 Story repo와 PR repo를 분리한다. `repo`는 Story가 있는 `loaring-product`, `prRepo`는 실제 PR이 열린 `loaring-backend` 또는 `loaring-frontend`다. PR 본문에는 `Related #<Story 번호>`를 둔다.
 
 GitHub Project v2 필드 조회에는 `gh` 토큰의 `read:project` scope가 필요하다. 해당 scope가 없으면 Project 동기화는 실패로 중단하지 않고 `blocked` 상태와 필요한 scope를 반환한다.
 
@@ -216,6 +219,22 @@ Story Issue는 마이그레이션 중에도 기본적으로 `loaring-story/loari
 `loaring_validate_workflow`는 Sprint 단위 점검에 사용한다. 예를 들어 `sprint: "sprint 3"`으로 호출하면 해당 Sprint Story만 대상으로 필수 Project 필드, MCP 추론값과 실제 필드값 불일치, 계약 없이 구현 상태로 넘어간 Story를 점검한다. `sprint`를 넘기지 않으면 GitHub Project의 `Sprint` iteration 설정에서 현재 날짜가 포함된 iteration title을 계산해 그 Sprint만 조회한다. `assignee: "github-login"`을 함께 넘기면 해당 담당자 Story만 남긴다.
 
 문서 수정은 GitHub PR/Issue를 기본 알림 채널로 사용한다. `loaring_prepare_doc_edit`는 Story 기준 브랜치, draft PR 제목/본문, Story Issue 댓글 초안을 만들고, `loaring_announce_doc_edit`는 같은 댓글을 `apply=true`, `confirm=true`일 때만 GitHub Issue에 게시한다. 권장 순서는 develop 최신화, Story 기준 docs 브랜치 생성, draft PR 조기 생성, Story Issue 댓글로 관련자 `@mention`, review 전 같은 Story나 파일을 수정하는 열린 PR 확인이다.
+
+팀원이 구현을 시작하기 전 권장 순서:
+
+1. `loaring_sync_product`, `loaring_sync_github`로 로컬 캐시를 최신화한다.
+2. `loaring_plan_story_work`로 Story의 target과 Contract Readiness를 확인한다.
+3. `loaring_detect_work_conflicts`로 같은 Story 또는 같은 문서 파일을 참조하는 열린 PR이 있는지 확인한다.
+4. `loaring_create_work_branch`를 계획 모드로 먼저 호출한다. `apply=true`에서는 target과 현재 checkout의 repo가 맞지 않으면 브랜치 생성을 차단한다.
+5. PR 본문은 `loaring_prepare_pr` 초안을 사용하고 `Related #<Story 번호>`를 유지한다.
+6. PR 생성 후 `loaring_link_pr_to_project`에 `prRepo`를 넘겨 Story를 `In Request`로 전이한다.
+
+팀 저장소명이 기본값과 다르면 아래 환경변수로 target 검증 기준을 맞춘다.
+
+```bash
+export LOARING_BACKEND_REPO=loaring-story/loaring-backend
+export LOARING_FRONTEND_REPO=loaring-story/loaring-frontend
+```
 
 Status 전이 규칙:
 
@@ -251,7 +270,7 @@ uv run python scripts/migration_dry_run.py
 uv run python scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-backend /path/to/loaring-frontend
 ```
 
-이 검증은 각 저장소 문서에 monorepo 전제나 상대 경로 결합이 남아 있는지 확인한다.
+이 검증은 각 저장소 문서에 단일 저장소 전제나 상대 경로 결합이 남아 있는지 확인한다.
 
 ## 릴리즈 점검
 

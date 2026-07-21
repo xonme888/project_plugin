@@ -6,11 +6,12 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
-from .config import project_number, story_repo_name
+from .config import product_repo_name, project_number, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import gh_graphql, gh_graphql_json
 from .github_sync import canonical_project_field_name, sync_project
 from .product_sync import infer_project_fields, now_iso
+from .safety import operation_lock, require_recent_product_sync, require_recent_story_sync
 
 
 CONTRACT_READINESS_OPTIONS = [
@@ -127,6 +128,40 @@ def update_project_fields(
 ) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
     selected_project = project_number(number)
+    if apply:
+        require_confirm(confirm)
+        with operation_lock(f"github-project:{selected_repo}:{selected_project}:story:{story_issue}"):
+            require_recent_product_sync(product_repo_name(), repo_ref())
+            require_recent_story_sync(selected_repo)
+            sync_project(repo=selected_repo, number=selected_project)
+            return _update_project_fields_locked(
+                story_issue=story_issue,
+                fields=fields,
+                apply=True,
+                confirm=True,
+                repo=selected_repo,
+                number=selected_project,
+            )
+    return _update_project_fields_locked(
+        story_issue=story_issue,
+        fields=fields,
+        apply=False,
+        confirm=confirm,
+        repo=selected_repo,
+        number=selected_project,
+    )
+
+
+def _update_project_fields_locked(
+    story_issue: int,
+    fields: dict[str, str] | None,
+    apply: bool,
+    confirm: bool,
+    repo: str,
+    number: int,
+) -> dict[str, Any]:
+    selected_repo = story_repo_name(repo)
+    selected_project = project_number(number)
     inferred = infer_project_fields(story_issue=story_issue, repo=selected_repo, number=selected_project)
     desired = fields or inferred["recommendedFields"]
     current = inferred["currentProjectFields"]
@@ -151,7 +186,6 @@ def update_project_fields(
         result["status"] = "planned"
         result["message"] = "Set apply=true and confirm=true to write these Project field changes."
         return result
-    require_confirm(confirm)
 
     item_id = cached_project_item_id(selected_repo, selected_project, story_issue)
     metadata = get_project_metadata(selected_repo, selected_project)
@@ -217,12 +251,17 @@ def sync_contract_readiness_options(
         return result
     require_confirm(confirm)
 
-    by_name = {option["name"]: option for option in field.get("options", [])}
-    options = [option_input(name, by_name.get(name)) for name in CONTRACT_READINESS_OPTIONS]
-    payload = gh_graphql_json(
-        UPDATE_FIELD_OPTIONS_MUTATION,
-        {"fieldId": field["id"], "options": options},
-    )
+    with operation_lock(f"github-project-options:{selected_repo}:{selected_project}:Contract Readiness"):
+        metadata = get_project_metadata(selected_repo, selected_project)
+        field = metadata["fields"].get("Contract Readiness")
+        if not field:
+            raise ValueError("Contract Readiness field not found in Project.")
+        by_name = {option["name"]: option for option in field.get("options", [])}
+        options = [option_input(name, by_name.get(name)) for name in CONTRACT_READINESS_OPTIONS]
+        payload = gh_graphql_json(
+            UPDATE_FIELD_OPTIONS_MUTATION,
+            {"fieldId": field["id"], "options": options},
+        )
     updated = (
         ((payload.get("data") or {}).get("updateProjectV2Field") or {})
         .get("projectV2Field")

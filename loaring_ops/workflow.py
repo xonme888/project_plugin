@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
+from urllib.parse import quote
+from pathlib import Path
 from typing import Any
 
-from .config import project_number, story_repo_name
+from .config import product_repo_name, project_number, repo_ref, story_repo_name
 from .db import connect, init_db
-from .github_client import gh_api, gh_api_post
+from .github_client import gh_api, gh_api_paginated, gh_api_post
 from .github_sync import decode_project, decode_story
 from .github_project import STATUS_TRANSITIONS, current_project_iteration, require_confirm, update_project_fields
 from .product_sync import get_contract, infer_project_fields
+from .safety import (
+    SafetyViolation,
+    operation_lock,
+    require_recent_product_sync,
+    require_recent_story_sync,
+)
 
 
 TARGET_PREFIXES = {
@@ -67,9 +76,11 @@ def create_work_branch(
     confirm: bool = False,
 ) -> dict[str, Any]:
     plan = prepare_branch(story_issue, target, slug=slug, repo=repo, number=number)
+    checkout_validation = validate_checkout_target(plan["target"], cwd, plan["repo"])
     result: dict[str, Any] = {
         **plan,
         "cwd": cwd,
+        "checkoutValidation": checkout_validation,
         "apply": apply,
         "confirmed": confirm,
     }
@@ -78,8 +89,12 @@ def create_work_branch(
         result["message"] = "Set apply=true and confirm=true to run git switch -c in the selected repo."
         return result
     require_confirm(confirm)
+    if checkout_validation["blockers"]:
+        raise SafetyViolation("; ".join(checkout_validation["blockers"]))
+    checkout = str(Path(cwd or os.getcwd()).resolve())
     command = ["git", "switch", "-c", plan["branch"]]
-    completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+    with operation_lock(f"git-checkout:{checkout}"):
+        completed = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
     result["command"] = " ".join(command)
     result["stdout"] = completed.stdout.strip()
     result["stderr"] = completed.stderr.strip()
@@ -147,7 +162,7 @@ def apply_workflow_transition(
         "effectiveFields": merged,
         "blockers": blockers,
     }
-    if blockers:
+    if blockers and not apply:
         result["status"] = "blocked"
         return result
     if not apply:
@@ -156,14 +171,28 @@ def apply_workflow_transition(
         result["message"] = "Set apply=true and confirm=true to write the Status field."
         return result
     require_confirm(confirm)
-    applied = update_project_fields(
-        story_issue=story_issue,
-        fields={"Status": target_status},
-        apply=True,
-        confirm=True,
-        repo=selected_repo,
-        number=selected_project,
-    )
+    with operation_lock(f"workflow-transition:{selected_repo}:{selected_project}:story:{story_issue}"):
+        require_recent_product_sync(product_repo_name(), repo_ref())
+        require_recent_story_sync(selected_repo)
+        story, project = cached_story_and_project(story_issue, selected_repo, selected_project)
+        fields = (project or {}).get("fields", {})
+        inference = infer_project_fields(story_issue=story_issue, repo=selected_repo, number=selected_project)
+        merged = {**inference["recommendedFields"], **fields}
+        blockers = transition_blockers(normalized, merged)
+        if blockers:
+            result["status"] = "blocked"
+            result["blockers"] = blockers
+            result["fields"] = fields
+            result["effectiveFields"] = merged
+            return result
+        applied = update_project_fields(
+            story_issue=story_issue,
+            fields={"Status": target_status},
+            apply=True,
+            confirm=True,
+            repo=selected_repo,
+            number=selected_project,
+        )
     result["status"] = "applied"
     result["applied"] = applied
     return result
@@ -328,10 +357,17 @@ def announce_doc_edit(
         result["message"] = "Set apply=true and confirm=true to post the Story Issue notification comment."
         return result
     require_confirm(confirm)
-    posted = gh_api_post(
-        f"repos/{prepared['repo']}/issues/{story_issue}/comments",
-        {"body": prepared["storyComment"]["body"]},
-    )
+    with operation_lock(f"github-issue-comment:{prepared['repo']}:{story_issue}:doc-edit"):
+        require_recent_story_sync(prepared["repo"])
+        existing = find_existing_issue_comment(prepared["repo"], story_issue, prepared["storyComment"]["body"])
+        if existing:
+            result["status"] = "duplicate"
+            result["comment"] = existing
+            return result
+        posted = gh_api_post(
+            f"repos/{prepared['repo']}/issues/{story_issue}/comments",
+            {"body": prepared["storyComment"]["body"]},
+        )
     result["status"] = "posted"
     result["comment"] = {
         "id": posted.get("id"),
@@ -558,7 +594,14 @@ def create_api_contract_issue_comment(
         result["message"] = "Set apply=true and confirm=true to post this Issue comment."
         return result
     require_confirm(confirm)
-    posted = gh_api_post(f"repos/{selected_repo}/issues/{story_issue}/comments", {"body": body})
+    with operation_lock(f"github-issue-comment:{selected_repo}:{story_issue}:api-contract"):
+        require_recent_story_sync(selected_repo)
+        existing = find_existing_issue_comment(selected_repo, story_issue, body)
+        if existing:
+            result["status"] = "duplicate"
+            result["comment"] = existing
+            return result
+        posted = gh_api_post(f"repos/{selected_repo}/issues/{story_issue}/comments", {"body": body})
     result["status"] = "posted"
     result["comment"] = {
         "id": posted.get("id"),
@@ -571,23 +614,26 @@ def link_pr_to_project(
     pr_number: int,
     story_issue: int | None = None,
     repo: str | None = None,
+    pr_repo: str | None = None,
     number: int | None = None,
     body: str | None = None,
     apply: bool = False,  # noqa: A002 - MCP argument name
     confirm: bool = False,
 ) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
+    selected_pr_repo = pr_repo or selected_repo
     selected_project = project_number(number)
     pr_payload: dict[str, Any] | None = None
     pr_body = body
     if pr_body is None:
-        pr_payload = gh_api(f"repos/{selected_repo}/pulls/{pr_number}")
+        pr_payload = gh_api(f"repos/{selected_pr_repo}/pulls/{pr_number}")
         pr_body = pr_payload.get("body") or ""
     detected = detect_related_story(pr_body)
     selected_story = story_issue or detected
     missing_related = selected_story is None or f"#{selected_story}" not in pr_body
     result: dict[str, Any] = {
         "repo": selected_repo,
+        "prRepo": selected_pr_repo,
         "projectNumber": selected_project,
         "prNumber": pr_number,
         "storyIssue": selected_story,
@@ -625,6 +671,38 @@ def link_pr_to_project(
     return result
 
 
+def detect_work_conflicts(
+    story_issue: int,
+    target: str | None = None,
+    files: list[str] | None = None,
+    repo: str | None = None,
+    pr_repos: list[str] | None = None,
+) -> dict[str, Any]:
+    """Find open PRs that already claim the same Story or documented files."""
+    selected_repo = story_repo_name(repo)
+    normalized_target = normalize_target(target or "docs")
+    selected_repos = normalize_pr_repos(pr_repos) or default_pr_repos_for_target(normalized_target, selected_repo)
+    normalized_files = normalize_files(files)
+    conflicts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for selected_pr_repo in selected_repos:
+        story_query = f'repo:{selected_pr_repo} is:pr is:open "Related #{story_issue}"'
+        conflicts.extend(search_open_pr_conflicts(selected_pr_repo, story_query, "story", story_issue, seen))
+        for path in normalized_files:
+            file_query = f'repo:{selected_pr_repo} is:pr is:open "{path}"'
+            conflicts.extend(search_open_pr_conflicts(selected_pr_repo, file_query, "file", path, seen))
+    return {
+        "repo": selected_repo,
+        "storyIssue": story_issue,
+        "target": normalized_target,
+        "prRepos": selected_repos,
+        "files": normalized_files,
+        "conflictCount": len(conflicts),
+        "conflicts": conflicts,
+        "status": "blocked" if conflicts else "clear",
+    }
+
+
 def cached_story_and_project(
     story_issue: int,
     repo: str,
@@ -648,6 +726,78 @@ def current_branch(cwd: str | None = None) -> str | None:
     if completed.returncode != 0:
         return None
     return completed.stdout.strip() or None
+
+
+def validate_checkout_target(target: str, cwd: str | None = None, story_repo: str | None = None) -> dict[str, Any]:
+    normalized_target = normalize_target(target)
+    selected_story_repo = story_repo_name(story_repo)
+    expected = expected_repos_for_target(normalized_target, selected_story_repo)
+    actual = checkout_repo_name(cwd)
+    actual_name = repo_leaf(actual)
+    expected_names = {repo_leaf(item) for item in expected}
+    blockers: list[str] = []
+    if expected and not actual:
+        blockers.append("Cannot determine the checkout repository. Configure remote.origin.url or pass the correct cwd.")
+    elif expected and actual not in expected and actual_name not in expected_names:
+        blockers.append(f"Target {normalized_target} must run in one of {sorted(expected)}, got {actual}.")
+    return {
+        "target": normalized_target,
+        "cwd": str(Path(cwd or os.getcwd()).resolve()),
+        "actualRepo": actual,
+        "expectedRepos": sorted(expected),
+        "valid": not blockers,
+        "blockers": blockers,
+    }
+
+
+def checkout_repo_name(cwd: str | None = None) -> str | None:
+    completed = subprocess.run(
+        ["git", "config", "--get", "remote.origin.url"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode == 0 and completed.stdout.strip():
+        return normalize_git_remote(completed.stdout.strip())
+    path = Path(cwd or os.getcwd()).resolve()
+    return path.name if path.name else None
+
+
+def normalize_git_remote(value: str) -> str:
+    normalized = value.strip()
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    ssh_match = re.match(r"git@[^:]+:(?P<repo>[^/]+/[^/]+)$", normalized)
+    if ssh_match:
+        return ssh_match.group("repo")
+    https_match = re.match(r"https?://[^/]+/(?P<repo>[^/]+/[^/]+)$", normalized)
+    if https_match:
+        return https_match.group("repo")
+    return normalized
+
+
+def expected_repos_for_target(target: str, story_repo: str) -> set[str]:
+    owner = story_repo.split("/", 1)[0]
+    defaults = {
+        "backend": os.environ.get("LOARING_BACKEND_REPO") or f"{owner}/loaring-backend",
+        "frontend": os.environ.get("LOARING_FRONTEND_REPO") or f"{owner}/loaring-frontend",
+        "product": product_repo_name(),
+        "contract": product_repo_name(),
+        "docs": product_repo_name(),
+    }
+    selected = defaults.get(target)
+    if not selected:
+        return set()
+    values = {selected}
+    if "/" in selected:
+        values.add(repo_leaf(selected))
+    return values
+
+
+def repo_leaf(repo: str | None) -> str:
+    if not repo:
+        return ""
+    return repo.rsplit("/", 1)[-1]
 
 
 def branch_pattern(story_issue: int, target: str) -> re.Pattern[str]:
@@ -720,6 +870,68 @@ def detect_related_story(body: str) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+def find_existing_issue_comment(repo: str, issue_number: int, body: str) -> dict[str, Any] | None:
+    comments = gh_api_paginated(f"repos/{repo}/issues/{issue_number}/comments?per_page=100")
+    for comment in comments:
+        if comment.get("body") == body:
+            return {
+                "id": comment.get("id"),
+                "url": comment.get("html_url"),
+            }
+    return None
+
+
+def search_open_pr_conflicts(
+    repo: str,
+    query: str,
+    conflict_type: str,
+    matched: int | str,
+    seen: set[str],
+) -> list[dict[str, Any]]:
+    payload = gh_api(f"search/issues?q={quote(query)}")
+    items = payload.get("items") or []
+    conflicts: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("html_url") or item.get("id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        conflicts.append(
+            {
+                "type": conflict_type,
+                "matched": matched,
+                "repo": repo,
+                "number": item.get("number"),
+                "title": item.get("title"),
+                "url": item.get("html_url"),
+                "state": item.get("state"),
+            }
+        )
+    return conflicts
+
+
+def normalize_pr_repos(repos: list[str] | None) -> list[str]:
+    if not repos:
+        return []
+    normalized: list[str] = []
+    for repo in repos:
+        if not isinstance(repo, str):
+            continue
+        value = repo.strip()
+        if not value:
+            continue
+        if value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def default_pr_repos_for_target(target: str, story_repo: str) -> list[str]:
+    expected = expected_repos_for_target(target, story_repo)
+    return sorted(repo for repo in expected if "/" in repo) or [story_repo]
 
 
 def normalize_files(files: list[str] | None) -> list[str]:

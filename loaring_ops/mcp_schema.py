@@ -24,6 +24,8 @@ TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "query": {"type": "string"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                "repo": {"type": "string", "description": "Product docs repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
             },
             "required": ["query"],
             "additionalProperties": False,
@@ -36,6 +38,8 @@ TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "storyIssue": {"type": "integer"},
                 "requirementId": {"type": "string"},
+                "repo": {"type": "string", "description": "Product docs repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
             },
             "additionalProperties": False,
         },
@@ -47,6 +51,8 @@ TOOLS: dict[str, dict[str, Any]] = {
             "properties": {
                 "storyIssue": {"type": "integer"},
                 "requirementId": {"type": "string"},
+                "repo": {"type": "string", "description": "Product docs repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
             },
             "additionalProperties": False,
         },
@@ -59,6 +65,7 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "storyIssue": {"type": "integer"},
                 "requirementId": {"type": "string"},
                 "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
                 "projectNumber": {"type": "integer"},
             },
             "additionalProperties": False,
@@ -366,7 +373,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
     },
     "loaring_link_pr_to_project": {
-        "description": "Check PR Story linkage and optionally move the linked Story to In Request.",
+        "description": "Check PR Story linkage across implementation/product repos and optionally move the linked Story to In Request.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -375,10 +382,30 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "body": {"type": "string"},
                 "apply": {"type": "boolean"},
                 "confirm": {"type": "boolean"},
-                "repo": {"type": "string", "description": "PR and Story repo. Defaults to loaring-story/loaring-product."},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "prRepo": {"type": "string", "description": "Repo containing the PR, e.g. owner/loaring-backend or owner/loaring-frontend. Defaults to repo."},
                 "projectNumber": {"type": "integer"},
             },
             "required": ["prNumber"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_detect_work_conflicts": {
+        "description": "Find open PRs that already reference the same Story or documented files before a team member starts work.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "storyIssue": {"type": "integer"},
+                "target": {"type": "string", "description": "product, contract, backend, frontend, fix, docs, or chore. Defaults to docs."},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
+                "prRepos": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "PR repos to scan, e.g. owner/loaring-backend and owner/loaring-frontend. Defaults from target.",
+                },
+            },
+            "required": ["storyIssue"],
             "additionalProperties": False,
         },
     },

@@ -11,6 +11,7 @@ from typing import Any
 from .config import PRODUCT_PATHS, project_number, repo_name, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import fetch_file
+from .safety import operation_lock
 
 
 KST = timezone(timedelta(hours=9), "KST")
@@ -34,6 +35,11 @@ def now_iso() -> str:
 def sync_product(repo: str | None = None, ref: str | None = None) -> dict[str, Any]:
     selected_repo = repo_name(repo)
     selected_ref = repo_ref(ref)
+    with operation_lock("sync-product-cache"):
+        return _sync_product_locked(selected_repo, selected_ref)
+
+
+def _sync_product_locked(selected_repo: str, selected_ref: str) -> dict[str, Any]:
     fetched_at = now_iso()
     conn = connect()
     init_db(conn)
@@ -105,17 +111,19 @@ def snapshot(conn: sqlite3.Connection, path: str, repo: str | None = None, ref: 
 
 
 def index_cached_product(conn: sqlite3.Connection, repo: str | None, ref: str | None, updated_at: str) -> None:
+    if repo is None or ref is None:
+        raise ValueError("repo and ref are required when indexing product docs.")
     catalog_content = snapshot(conn, "docs/api/api-catalog.yml", repo, ref)
     if catalog_content:
         for spec in parse_api_catalog(catalog_content):
             conn.execute(
                 """
                 INSERT INTO api_specs (
-                  path, domain, title, story_issue, requirement_ids_json,
+                  repo, ref, path, domain, title, story_issue, requirement_ids_json,
                   endpoints_json, lifecycle, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(path) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(repo, ref, path) DO UPDATE SET
                   domain = excluded.domain,
                   title = excluded.title,
                   story_issue = excluded.story_issue,
@@ -125,6 +133,8 @@ def index_cached_product(conn: sqlite3.Connection, repo: str | None, ref: str | 
                   updated_at = excluded.updated_at
                 """,
                 (
+                    repo,
+                    ref,
                     spec.get("path"),
                     spec.get("domain"),
                     spec.get("title"),
@@ -142,11 +152,11 @@ def index_cached_product(conn: sqlite3.Connection, repo: str | None, ref: str | 
             conn.execute(
                 """
                 INSERT INTO requirements (
-                  requirement_id, title, status, epic, story_issues_json,
+                  repo, ref, requirement_id, title, status, epic, story_issues_json,
                   api_specs_json, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(requirement_id) DO UPDATE SET
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(repo, ref, requirement_id) DO UPDATE SET
                   title = excluded.title,
                   status = excluded.status,
                   epic = excluded.epic,
@@ -155,6 +165,8 @@ def index_cached_product(conn: sqlite3.Connection, repo: str | None, ref: str | 
                   updated_at = excluded.updated_at
                 """,
                 (
+                    repo,
+                    ref,
                     req.get("id"),
                     req.get("title"),
                     req.get("status"),
@@ -166,69 +178,108 @@ def index_cached_product(conn: sqlite3.Connection, repo: str | None, ref: str | 
             )
 
 
-def find_story(query: str, limit: int = 10) -> dict[str, Any]:
+def find_story(query: str, limit: int = 10, repo: str | None = None, ref: str | None = None) -> dict[str, Any]:
+    selected_repo = repo_name(repo)
+    selected_ref = repo_ref(ref)
     conn = connect()
     init_db(conn)
     like = f"%{query}%"
     req_rows = conn.execute(
         """
         SELECT * FROM requirements
-        WHERE requirement_id LIKE ? OR title LIKE ? OR epic LIKE ?
+        WHERE repo = ? AND ref = ?
+          AND (requirement_id LIKE ? OR title LIKE ? OR epic LIKE ?)
         ORDER BY updated_at DESC
         LIMIT ?
         """,
-        (like, like, like, limit),
+        (selected_repo, selected_ref, like, like, like, limit),
     ).fetchall()
     spec_rows = conn.execute(
         """
         SELECT * FROM api_specs
-        WHERE path LIKE ? OR title LIKE ? OR domain LIKE ?
+        WHERE repo = ? AND ref = ?
+          AND (path LIKE ? OR title LIKE ? OR domain LIKE ?)
         ORDER BY updated_at DESC
         LIMIT ?
         """,
-        (like, like, like, limit),
+        (selected_repo, selected_ref, like, like, like, limit),
     ).fetchall()
-    story_map = snapshot(conn, "docs/requirements/story-map.md")
+    story_map = snapshot(conn, "docs/requirements/story-map.md", selected_repo, selected_ref)
     story_map_hits = search_story_map(story_map or "", query, limit)
     return {
+        "repo": selected_repo,
+        "ref": selected_ref,
         "requirements": [decode_json_fields(dict(row)) for row in req_rows],
         "apiSpecs": [decode_json_fields(dict(row)) for row in spec_rows],
         "storyMapHits": story_map_hits,
     }
 
 
-def get_contract(story_issue: int | None = None, requirement_id: str | None = None) -> dict[str, Any]:
+def get_contract(
+    story_issue: int | None = None,
+    requirement_id: str | None = None,
+    repo: str | None = None,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    selected_repo = repo_name(repo)
+    selected_ref = repo_ref(ref)
     conn = connect()
     init_db(conn)
     specs: list[dict[str, Any]] = []
     requirements: list[dict[str, Any]] = []
 
     if requirement_id:
-        req_row = conn.execute("SELECT * FROM requirements WHERE requirement_id = ?", (requirement_id,)).fetchone()
+        req_row = conn.execute(
+            "SELECT * FROM requirements WHERE repo = ? AND ref = ? AND requirement_id = ?",
+            (selected_repo, selected_ref, requirement_id),
+        ).fetchone()
         if req_row:
             req = decode_json_fields(dict(req_row))
             requirements.append(req)
             for path in req.get("api_specs", []):
-                spec_row = conn.execute("SELECT * FROM api_specs WHERE path = ?", (path,)).fetchone()
+                spec_row = conn.execute(
+                    "SELECT * FROM api_specs WHERE repo = ? AND ref = ? AND path = ?",
+                    (selected_repo, selected_ref, path),
+                ).fetchone()
                 if spec_row:
                     specs.append(decode_json_fields(dict(spec_row)))
 
     if story_issue is not None:
-        for row in conn.execute("SELECT * FROM api_specs WHERE story_issue = ?", (story_issue,)).fetchall():
+        for row in conn.execute(
+            "SELECT * FROM api_specs WHERE repo = ? AND ref = ? AND story_issue = ?",
+            (selected_repo, selected_ref, story_issue),
+        ).fetchall():
             specs.append(decode_json_fields(dict(row)))
-        for row in conn.execute("SELECT * FROM requirements").fetchall():
+        for row in conn.execute(
+            "SELECT * FROM requirements WHERE repo = ? AND ref = ?",
+            (selected_repo, selected_ref),
+        ).fetchall():
             req = decode_json_fields(dict(row))
             if story_issue in req.get("story_issues", []):
                 requirements.append(req)
 
-    return {"storyIssue": story_issue, "requirementId": requirement_id, "requirements": requirements, "apiSpecs": dedupe_by_path(specs)}
+    return {
+        "repo": selected_repo,
+        "ref": selected_ref,
+        "storyIssue": story_issue,
+        "requirementId": requirement_id,
+        "requirements": requirements,
+        "apiSpecs": dedupe_by_path(specs),
+    }
 
 
-def validate_contract_readiness(story_issue: int | None = None, requirement_id: str | None = None) -> dict[str, Any]:
-    contract = get_contract(story_issue=story_issue, requirement_id=requirement_id)
+def validate_contract_readiness(
+    story_issue: int | None = None,
+    requirement_id: str | None = None,
+    repo: str | None = None,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    selected_repo = repo_name(repo)
+    selected_ref = repo_ref(ref)
+    contract = get_contract(story_issue=story_issue, requirement_id=requirement_id, repo=selected_repo, ref=selected_ref)
     conn = connect()
     init_db(conn)
-    specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], None)
+    specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], None, selected_repo, selected_ref)
     issues: list[str] = []
     if not specs:
         issues.append("No linked full api-spec entry found in api-catalog.yml.")
@@ -251,6 +302,7 @@ def infer_project_fields(
     story_issue: int | None = None,
     requirement_id: str | None = None,
     repo: str | None = None,
+    ref: str | None = None,
     number: int | None = None,
 ) -> dict[str, Any]:
     """Infer project field values from cached product docs and Story metadata."""
@@ -258,16 +310,18 @@ def infer_project_fields(
         raise ValueError("storyIssue or requirementId is required")
 
     selected_repo = story_repo_name(repo)
+    selected_product_repo = repo_name()
+    selected_ref = repo_ref(ref)
     selected_project = project_number(number)
     conn = connect()
     init_db(conn)
 
-    contract = get_contract(story_issue=story_issue, requirement_id=requirement_id)
+    contract = get_contract(story_issue=story_issue, requirement_id=requirement_id, repo=selected_product_repo, ref=selected_ref)
     story = latest_story(conn, selected_repo, story_issue)
     project_fields = latest_project_fields(conn, selected_repo, selected_project, story_issue)
 
     contract_required = infer_contract_required(contract, story)
-    enriched_specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], story)
+    enriched_specs = enrich_specs_with_readiness(conn, contract["apiSpecs"], story, selected_product_repo, selected_ref)
     enriched_contract = {**contract, "apiSpecs": enriched_specs}
     contract_readiness = infer_contract_readiness(contract_required, enriched_contract, story)
     implementation_target = infer_implementation_target(contract_required, contract, story)
@@ -283,6 +337,8 @@ def infer_project_fields(
     ]
     return {
         "repo": selected_repo,
+        "productRepo": selected_product_repo,
+        "ref": selected_ref,
         "projectNumber": selected_project,
         "storyIssue": story_issue,
         "requirementId": requirement_id,
@@ -413,10 +469,12 @@ def enrich_specs_with_readiness(
     conn: sqlite3.Connection,
     specs: list[dict[str, Any]],
     story: dict[str, Any] | None,
+    repo: str,
+    ref: str,
 ) -> list[dict[str, Any]]:
     enriched: list[dict[str, Any]] = []
     for spec in specs:
-        content = snapshot(conn, str(spec.get("path") or ""))
+        content = snapshot(conn, str(spec.get("path") or ""), repo, ref)
         parsed = parse_api_spec_json(content) if content else {}
         evaluation = spec_readiness_evaluation({**spec, "spec": parsed}, story)
         enriched.append({**spec, "readinessEvidence": evaluation})

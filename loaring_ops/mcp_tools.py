@@ -20,6 +20,7 @@ from .workflow import (
     contract_gap_report,
     create_api_contract_issue_comment,
     create_work_branch,
+    detect_work_conflicts,
     link_pr_to_project,
     prepare_doc_edit,
     plan_story_work,
@@ -37,19 +38,29 @@ JsonDict = dict[str, Any]
 def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
     return {
         "loaring_sync_product": lambda args: sync_product(repo=args.get("repo"), ref=args.get("ref")),
-        "loaring_find_story": lambda args: find_story(args["query"], int(args.get("limit") or 10)),
+        "loaring_find_story": lambda args: find_story(
+            args["query"],
+            int(args.get("limit") or 10),
+            repo=args.get("repo"),
+            ref=args.get("ref"),
+        ),
         "loaring_get_contract": lambda args: get_contract(
             story_issue=args.get("storyIssue"),
             requirement_id=args.get("requirementId"),
+            repo=args.get("repo"),
+            ref=args.get("ref"),
         ),
         "loaring_validate_contract_readiness": lambda args: validate_contract_readiness(
             story_issue=args.get("storyIssue"),
             requirement_id=args.get("requirementId"),
+            repo=args.get("repo"),
+            ref=args.get("ref"),
         ),
         "loaring_infer_project_fields": lambda args: infer_project_fields(
             story_issue=args.get("storyIssue"),
             requirement_id=args.get("requirementId"),
             repo=args.get("repo"),
+            ref=args.get("ref"),
             number=args.get("projectNumber"),
         ),
         "loaring_sync_stories": lambda args: sync_stories(
@@ -202,7 +213,15 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             apply=bool(args.get("apply")),
             confirm=bool(args.get("confirm")),
             repo=args.get("repo"),
+            pr_repo=args.get("prRepo"),
             number=args.get("projectNumber"),
+        ),
+        "loaring_detect_work_conflicts": lambda args: detect_work_conflicts(
+            story_issue=int(args["storyIssue"]),
+            target=args.get("target"),
+            files=args.get("files"),
+            repo=args.get("repo"),
+            pr_repos=args.get("prRepos"),
         ),
     }
 

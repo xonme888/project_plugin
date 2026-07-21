@@ -87,3 +87,14 @@ Use existing LoaRing branch conventions when a task needs a new branch:
 - General docs or ops: `docs/{slug}` or `chore/{slug}`
 
 Prefer draft PRs for early coordination when product docs or contracts can affect backend/frontend work. Do not create PRs, edit GitHub Issues, or change GitHub Project fields without explicit user approval.
+
+When a backend or frontend teammate asks to start work and does not know the LoaRing flow, guide the sequence explicitly:
+
+1. Refresh product and GitHub caches with the LoaRing Product Ops tools.
+2. Plan the Story with `loaring_plan_story_work` and confirm `Contract Readiness` allows the requested target.
+3. Run `loaring_detect_work_conflicts` for the Story and known product/API files before branch creation.
+4. Use `loaring_create_work_branch` in the matching repo. Apply mode must block target/repo mismatches.
+5. Prepare the PR body with `loaring_prepare_pr` and keep `Related #<Story number>`.
+6. After the PR exists, use `loaring_link_pr_to_project` with `prRepo` set to the implementation repo.
+
+Default implementation repos are inferred from the Story owner as `loaring-backend` and `loaring-frontend`. If the team uses different repo names, use `LOARING_BACKEND_REPO` and `LOARING_FRONTEND_REPO`.

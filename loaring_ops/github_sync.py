@@ -10,6 +10,7 @@ from .config import legacy_story_repos, project_number, story_repo_name
 from .db import connect, init_db
 from .github_client import gh_api_paginated, gh_graphql
 from .product_sync import now_iso
+from .safety import operation_lock
 
 
 PROJECT_ITEMS_QUERY = """
@@ -63,6 +64,16 @@ query($owner: String!, $number: Int!%s) {
 
 def sync_stories(repo: str | None = None, label: str | None = None, include_legacy: bool = False) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
+    with operation_lock(f"sync-stories:{selected_repo}"):
+        return _sync_stories_locked(selected_repo, repo, label, include_legacy)
+
+
+def _sync_stories_locked(
+    selected_repo: str,
+    repo: str | None,
+    label: str | None,
+    include_legacy: bool,
+) -> dict[str, Any]:
     repos = [selected_repo]
     if include_legacy and repo is None:
         repos.extend(item for item in legacy_story_repos() if item not in repos)
@@ -105,8 +116,13 @@ def sync_stories_for_repo(conn: sqlite3.Connection, selected_repo: str, label: s
 
 def sync_project(repo: str | None = None, number: int | None = None) -> dict[str, Any]:
     selected_repo = story_repo_name(repo)
-    owner = selected_repo.split("/", 1)[0]
     selected_project = project_number(number)
+    with operation_lock(f"sync-project:{selected_repo}:{selected_project}"):
+        return _sync_project_locked(selected_repo, selected_project)
+
+
+def _sync_project_locked(selected_repo: str, selected_project: int) -> dict[str, Any]:
+    owner = selected_repo.split("/", 1)[0]
     synced_at = now_iso()
     conn = connect()
     init_db(conn)

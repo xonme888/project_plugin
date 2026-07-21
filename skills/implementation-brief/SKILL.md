@@ -28,11 +28,21 @@ When the LoaRing Product Ops MCP tools are available, start with:
 - `loaring_get_contract` to retrieve linked API contract metadata
 - `loaring_infer_project_fields` to verify contract fields and implementation target
 - `loaring_plan_story_work` to decide whether implementation can start and which branch target applies
+- `loaring_detect_work_conflicts` to find open PRs that already reference the same Story or files before someone starts work
 - `loaring_prepare_branch` to produce the standard branch name when the user asks for branch preparation
-- `loaring_create_work_branch` to create the branch only after the user approves the exact repo and target
+- `loaring_create_work_branch` to create the branch only after the user approves the exact repo and target; apply mode blocks target/repo mismatches
 - `loaring_validate_branch_name` to check implementation repo branch naming before coding or PR work
 - `loaring_prepare_pr` to draft a PR title/body with `Related #...` and contract readiness context
-- `loaring_link_pr_to_project` to check PR linkage and, with approval, move the Story to `In Request`
+- `loaring_link_pr_to_project` to check PR linkage across product/backend/frontend repos and, with approval, move the Story to `In Request`
+
+If a team member asks to start backend or frontend work but does not know the workflow, guide them through this sequence instead of assuming they know the tool order:
+
+1. Refresh product and GitHub caches.
+2. Plan the Story work and read readiness gates.
+3. Run conflict detection for the Story and any known product docs/API files.
+4. Prepare or create the target branch in the matching implementation repo only.
+5. Draft the PR body with `Related #<Story number>`.
+6. Link the implementation PR back to the product Story by passing the implementation `prRepo`.
 
 Do not produce an implementation-ready provider or consumer brief for API work unless a full `*.api-spec.json` exists in `loaring-product`, or the user explicitly accepts a contract gap. If the contract is missing, return a blocked brief with the product contract question or proposal.
 

@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any
 
-from .config import legacy_story_repos, story_repo_name
+from .config import legacy_story_repos, repo_name, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_sync import sync_stories
 from .product_sync import sync_product
@@ -143,9 +143,14 @@ def title_terms(title: str) -> set[str]:
 
 
 def load_traceability() -> list[dict[str, Any]]:
+    selected_repo = repo_name()
+    selected_ref = repo_ref()
     conn = connect()
     init_db(conn)
-    rows = conn.execute("SELECT * FROM requirements ORDER BY requirement_id").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM requirements WHERE repo = ? AND ref = ? ORDER BY requirement_id",
+        (selected_repo, selected_ref),
+    ).fetchall()
     result = []
     for row in rows:
         data = dict(row)
@@ -163,9 +168,14 @@ def load_traceability() -> list[dict[str, Any]]:
 
 
 def load_catalog() -> list[dict[str, Any]]:
+    selected_repo = repo_name()
+    selected_ref = repo_ref()
     conn = connect()
     init_db(conn)
-    rows = conn.execute("SELECT * FROM api_specs ORDER BY path").fetchall()
+    rows = conn.execute(
+        "SELECT * FROM api_specs WHERE repo = ? AND ref = ? ORDER BY path",
+        (selected_repo, selected_ref),
+    ).fetchall()
     result = []
     for row in rows:
         data = dict(row)
