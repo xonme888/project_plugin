@@ -13,7 +13,7 @@ from typing import Any
 from .config import product_repo_name, project_number, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import gh_api, gh_api_paginated, gh_api_post
-from .github_sync import decode_project, decode_story
+from .github_sync import decode_project, decode_story, sync_stories
 from .github_project import STATUS_TRANSITIONS, current_project_iteration, require_confirm, update_project_fields
 from .product_sync import get_contract, infer_project_fields
 from .safety import (
@@ -358,7 +358,9 @@ def announce_doc_edit(
         return result
     require_confirm(confirm)
     with operation_lock(f"github-issue-comment:{prepared['repo']}:{story_issue}:doc-edit"):
-        require_recent_story_sync(prepared["repo"])
+        sync_recovery = ensure_recent_story_sync_for_apply(prepared["repo"])
+        if sync_recovery:
+            result["syncRecovery"] = sync_recovery
         existing = find_existing_issue_comment(prepared["repo"], story_issue, prepared["storyComment"]["body"])
         if existing:
             result["status"] = "duplicate"
@@ -552,6 +554,13 @@ def create_api_contract_issue_comment(
     kind: str,
     question: str | None = None,
     decision: str | None = None,
+    proposal: str | None = None,
+    api_spec_path: str | None = None,
+    endpoint_id: str | None = None,
+    current_contract: str | None = None,
+    change_type: str | None = None,
+    impact: str | None = None,
+    confirmation_request: str | None = None,
     repo: str | None = None,
     number: int | None = None,
     apply: bool = False,  # noqa: A002 - MCP argument name
@@ -561,23 +570,39 @@ def create_api_contract_issue_comment(
     selected_project = project_number(number)
     story, project = cached_story_and_project(story_issue, selected_repo, selected_project)
     normalized_kind = kind.strip().lower()
-    if normalized_kind not in {"question", "decision"}:
-        raise ValueError("kind must be question or decision")
-    heading = "[계약 질문]" if normalized_kind == "question" else "[계약 결정]"
-    content = question if normalized_kind == "question" else decision
-    if not content:
-        content = "TODO: API 요청/응답/에러/권한/검증 기준을 구체적으로 적는다."
-    body = "\n".join(
-        [
-            heading,
-            "",
-            f"- Story: #{story_issue}",
-            f"- 제목: {(story or {}).get('title') or ''}",
-            f"- Contract Readiness: {((project or {}).get('fields') or {}).get('Contract Readiness') or ''}",
-            "",
-            content,
-        ]
-    )
+    if normalized_kind not in {"question", "decision", "proposal"}:
+        raise ValueError("kind must be question, decision, or proposal")
+    if normalized_kind == "proposal":
+        normalized_change_type = (change_type or "unknown").strip().lower()
+        if normalized_change_type not in {"additive", "behavioral", "breaking", "unknown"}:
+            normalized_change_type = "unknown"
+        body = contract_proposal_comment_body(
+            story_issue=story_issue,
+            story_title=(story or {}).get("title") or "",
+            api_spec_path=api_spec_path,
+            endpoint_id=endpoint_id,
+            current_contract=current_contract,
+            proposal=proposal,
+            change_type=normalized_change_type,
+            confirmation_request=confirmation_request,
+            impact=impact,
+        )
+    else:
+        heading = "[계약 질문]" if normalized_kind == "question" else "[계약 결정]"
+        content = question if normalized_kind == "question" else decision
+        if not content:
+            content = "TODO: API 요청/응답/에러/권한/검증 기준을 구체적으로 적는다."
+        body = "\n".join(
+            [
+                heading,
+                "",
+                f"- Story: #{story_issue}",
+                f"- 제목: {(story or {}).get('title') or ''}",
+                f"- Contract Readiness: {((project or {}).get('fields') or {}).get('Contract Readiness') or ''}",
+                "",
+                content,
+            ]
+        )
     result: dict[str, Any] = {
         "repo": selected_repo,
         "projectNumber": selected_project,
@@ -595,7 +620,9 @@ def create_api_contract_issue_comment(
         return result
     require_confirm(confirm)
     with operation_lock(f"github-issue-comment:{selected_repo}:{story_issue}:api-contract"):
-        require_recent_story_sync(selected_repo)
+        sync_recovery = ensure_recent_story_sync_for_apply(selected_repo)
+        if sync_recovery:
+            result["syncRecovery"] = sync_recovery
         existing = find_existing_issue_comment(selected_repo, story_issue, body)
         if existing:
             result["status"] = "duplicate"
@@ -608,6 +635,63 @@ def create_api_contract_issue_comment(
         "url": posted.get("html_url"),
     }
     return result
+
+
+def contract_proposal_comment_body(
+    story_issue: int,
+    story_title: str,
+    api_spec_path: str | None,
+    endpoint_id: str | None,
+    current_contract: str | None,
+    proposal: str | None,
+    change_type: str,
+    confirmation_request: str | None,
+    impact: str | None,
+) -> str:
+    return "\n".join(
+        [
+            "[계약 제안]",
+            "",
+            f"- Story: #{story_issue} {story_title}".rstrip(),
+            f"- API spec: {api_spec_path or 'TODO'}",
+            f"- Endpoint: {endpoint_id or 'TODO'}",
+            "",
+            "## 현재 계약",
+            current_contract or "TODO: 기존 request/response/error/validation 계약을 요약한다.",
+            "",
+            "## 제안 payload",
+            proposal or "TODO: 제안할 payload 또는 schema 변경을 적는다.",
+            "",
+            f"## 변경 타입: {change_type}",
+            "",
+            "## 확인 요청",
+            confirmation_request or "이 변경을 위 타입으로 진행해도 되는지 provider/consumer 확인이 필요합니다.",
+            "",
+            "## provider/consumer 영향",
+            impact or "- Provider: TODO\n- Consumer: TODO",
+        ]
+    )
+
+
+def ensure_recent_story_sync_for_apply(repo: str) -> dict[str, Any] | None:
+    try:
+        require_recent_story_sync(repo)
+        return None
+    except SafetyViolation as exc:
+        try:
+            synced = sync_stories(repo=repo)
+            require_recent_story_sync(repo)
+            return {
+                "status": "synced",
+                "reason": str(exc),
+                "sync": synced,
+            }
+        except Exception as sync_exc:
+            raise SafetyViolation(
+                "github-stories cache is stale and automatic read-only sync failed. "
+                f"Run loaring_sync_stories with repo={repo!r}, then retry apply=true. "
+                f"Original error: {exc}; sync error: {sync_exc}"
+            ) from sync_exc
 
 
 def link_pr_to_project(

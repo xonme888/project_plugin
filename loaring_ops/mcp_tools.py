@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any, Callable
 
 from .github_project import sync_contract_readiness_options, update_project_fields
@@ -9,11 +10,14 @@ from .github_sync import find_cached_stories, get_story, sync_github, sync_proje
 from .migration import migration_dry_run
 from .product_sync import (
     find_story,
+    get_api_spec,
     get_contract,
     infer_project_fields,
+    resolve_contract_target,
     sync_product,
     validate_contract_readiness,
 )
+from .telemetry import log_tool_bottlenecks_best_effort, weekly_bottleneck_report
 from .workflow import (
     announce_doc_edit,
     apply_workflow_transition,
@@ -49,6 +53,23 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             requirement_id=args.get("requirementId"),
             repo=args.get("repo"),
             ref=args.get("ref"),
+        ),
+        "loaring_resolve_contract_target": lambda args: resolve_contract_target(
+            query=args.get("query"),
+            story_issue=args.get("storyIssue"),
+            requirement_id=args.get("requirementId"),
+            api_spec_path=args.get("apiSpecPath"),
+            repo=args.get("repo"),
+            ref=args.get("ref"),
+        ),
+        "loaring_get_api_spec": lambda args: get_api_spec(
+            path=args.get("path"),
+            story_issue=args.get("storyIssue"),
+            requirement_id=args.get("requirementId"),
+            endpoint_id=args.get("endpointId"),
+            repo=args.get("repo"),
+            ref=args.get("ref"),
+            include_raw=bool(args.get("includeRaw")),
         ),
         "loaring_validate_contract_readiness": lambda args: validate_contract_readiness(
             story_issue=args.get("storyIssue"),
@@ -201,6 +222,13 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             kind=args["kind"],
             question=args.get("question"),
             decision=args.get("decision"),
+            proposal=args.get("proposal"),
+            api_spec_path=args.get("apiSpecPath"),
+            endpoint_id=args.get("endpointId"),
+            current_contract=args.get("currentContract"),
+            change_type=args.get("changeType"),
+            impact=args.get("impact"),
+            confirmation_request=args.get("confirmationRequest"),
             apply=bool(args.get("apply")),
             confirm=bool(args.get("confirm")),
             repo=args.get("repo"),
@@ -223,6 +251,13 @@ def tool_handlers() -> dict[str, Callable[[JsonDict], Any]]:
             repo=args.get("repo"),
             pr_repos=args.get("prRepos"),
         ),
+        "loaring_weekly_bottleneck_report": lambda args: weekly_bottleneck_report(
+            since=args.get("since"),
+            until=args.get("until"),
+            repo=args.get("repo"),
+            event_type=args.get("eventType"),
+            limit=int(args.get("limit") or 20),
+        ),
     }
 
 
@@ -234,4 +269,15 @@ def call_tool(name: str, arguments: JsonDict) -> Any:
     handlers = tool_handlers()
     if name not in handlers:
         raise ValueError(f"Unknown tool: {name}")
-    return handlers[name](arguments)
+    started = monotonic()
+    result: Any = None
+    error: BaseException | None = None
+    try:
+        result = handlers[name](arguments)
+        return result
+    except BaseException as exc:
+        error = exc
+        raise
+    finally:
+        duration_ms = int((monotonic() - started) * 1000)
+        log_tool_bottlenecks_best_effort(name, arguments, result, error, duration_ms)

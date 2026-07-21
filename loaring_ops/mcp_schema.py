@@ -44,6 +44,37 @@ TOOLS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "loaring_resolve_contract_target": {
+        "description": "Resolve a Story/query/requirement/api-spec hint to the canonical loaring-product contract target, including legacy Story mappings.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "storyIssue": {"type": "integer"},
+                "requirementId": {"type": "string"},
+                "apiSpecPath": {"type": "string"},
+                "repo": {"type": "string", "description": "Product docs repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
+            },
+            "additionalProperties": False,
+        },
+    },
+    "loaring_get_api_spec": {
+        "description": "Get cached full api-spec endpoint, request/response schema, error, validation, and consumer guidance summaries.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "storyIssue": {"type": "integer"},
+                "requirementId": {"type": "string"},
+                "endpointId": {"type": "string"},
+                "repo": {"type": "string", "description": "Product docs repo. Defaults to loaring-story/loaring-product."},
+                "ref": {"type": "string", "description": "Product docs ref. Defaults to develop."},
+                "includeRaw": {"type": "boolean", "description": "Include parsed raw JSON when true. Defaults to false."},
+            },
+            "additionalProperties": False,
+        },
+    },
     "loaring_validate_contract_readiness": {
         "description": "Check whether a Story or requirement has linked full API contract metadata ready for implementation.",
         "inputSchema": {
@@ -355,14 +386,21 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
     },
     "loaring_create_api_contract_issue_comment": {
-        "description": "Generate or post a standardized [계약 질문] or [계약 결정] Issue comment body.",
+        "description": "Generate or post a standardized [계약 질문], [계약 결정], or [계약 제안] Issue comment body.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "storyIssue": {"type": "integer"},
-                "kind": {"type": "string", "description": "question or decision."},
+                "kind": {"type": "string", "description": "question, decision, or proposal."},
                 "question": {"type": "string"},
                 "decision": {"type": "string"},
+                "proposal": {"type": "string", "description": "Proposal payload or schema/content change summary for kind=proposal."},
+                "apiSpecPath": {"type": "string"},
+                "endpointId": {"type": "string"},
+                "currentContract": {"type": "string"},
+                "changeType": {"type": "string", "description": "additive, behavioral, breaking, or unknown."},
+                "impact": {"type": "string", "description": "Provider/consumer impact summary."},
+                "confirmationRequest": {"type": "string"},
                 "apply": {"type": "boolean"},
                 "confirm": {"type": "boolean"},
                 "repo": {"type": "string", "description": "Story issue repo. Defaults to loaring-story/loaring-product."},
@@ -406,6 +444,20 @@ TOOLS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["storyIssue"],
+            "additionalProperties": False,
+        },
+    },
+    "loaring_weekly_bottleneck_report": {
+        "description": "Summarize plugin interaction bottleneck telemetry for the last week or a supplied time window.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "since": {"type": "string", "description": "Inclusive ISO datetime. Defaults to 7 days before until."},
+                "until": {"type": "string", "description": "Exclusive ISO datetime. Defaults to now."},
+                "repo": {"type": "string"},
+                "eventType": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+            },
             "additionalProperties": False,
         },
     },

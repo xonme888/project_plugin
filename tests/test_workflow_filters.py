@@ -10,8 +10,14 @@ from unittest.mock import patch
 
 from loaring_ops.db import connect, init_db
 from loaring_ops.github_project import current_iteration_from_field
-from loaring_ops.product_sync import get_contract, now_iso
+from loaring_ops.mcp_tools import call_tool
+from loaring_ops.product_sync import get_api_spec, get_contract, now_iso, resolve_contract_target
 from loaring_ops.safety import SafetyViolation
+from loaring_ops.telemetry import (
+    extract_bottleneck_events,
+    insert_events,
+    weekly_bottleneck_report,
+)
 from loaring_ops.workflow import (
     announce_doc_edit,
     detect_work_conflicts,
@@ -27,7 +33,9 @@ class WorkflowFilterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.previous_db = os.environ.get("LOARING_PRODUCT_OPS_DB")
+        self.previous_telemetry_db = os.environ.get("LOARING_PRODUCT_OPS_TELEMETRY_DB")
         os.environ["LOARING_PRODUCT_OPS_DB"] = os.path.join(self.tempdir.name, "test.sqlite")
+        os.environ["LOARING_PRODUCT_OPS_TELEMETRY_DB"] = os.path.join(self.tempdir.name, "telemetry.sqlite")
         conn = connect()
         init_db(conn)
         self._insert_story(conn, 1, "Mine current", ["octo"], "Sprint 2")
@@ -42,6 +50,10 @@ class WorkflowFilterTests(unittest.TestCase):
             os.environ.pop("LOARING_PRODUCT_OPS_DB", None)
         else:
             os.environ["LOARING_PRODUCT_OPS_DB"] = self.previous_db
+        if self.previous_telemetry_db is None:
+            os.environ.pop("LOARING_PRODUCT_OPS_TELEMETRY_DB", None)
+        else:
+            os.environ["LOARING_PRODUCT_OPS_TELEMETRY_DB"] = self.previous_telemetry_db
         self.tempdir.cleanup()
 
     def test_current_iteration_uses_project_configuration_dates(self) -> None:
@@ -155,13 +167,46 @@ class WorkflowFilterTests(unittest.TestCase):
         self.assertEqual(result["comment"]["id"], 12)
         gh_api_post.assert_not_called()
 
-    def test_announce_doc_edit_requires_recent_story_sync_when_confirmed(self) -> None:
+    @patch("loaring_ops.workflow.sync_stories")
+    def test_announce_doc_edit_reports_recovery_when_story_cache_was_stale(self, sync_stories) -> None:
+        def mark_synced(repo: str) -> dict:
+            conn = connect()
+            self._insert_sync_state(conn, "github-stories", repo, "")
+            conn.commit()
+            conn.close()
+            return {"status": "synced"}
+
+        sync_stories.side_effect = mark_synced
         conn = connect()
         conn.execute("DELETE FROM sync_state WHERE source = 'github-stories'")
         conn.commit()
         conn.close()
 
-        with self.assertRaises(SafetyViolation):
+        with patch("loaring_ops.workflow.gh_api_paginated", return_value=[]), patch(
+            "loaring_ops.workflow.gh_api_post",
+            return_value={"id": 11, "html_url": "https://github.com/comment/11"},
+        ):
+            result = announce_doc_edit(
+                story_issue=1,
+                files=["docs/requirements/story-map.md"],
+                notify_users=["octo"],
+                apply=True,
+                confirm=True,
+            )
+
+        self.assertEqual(result["status"], "posted")
+        self.assertEqual(result["syncRecovery"]["status"], "synced")
+        sync_stories.assert_called_once_with(repo="loaring-story/loaring-product")
+
+    @patch("loaring_ops.workflow.sync_stories")
+    def test_announce_doc_edit_returns_clear_recovery_instruction_when_sync_fails(self, sync_stories) -> None:
+        sync_stories.side_effect = RuntimeError("offline")
+        conn = connect()
+        conn.execute("DELETE FROM sync_state WHERE source = 'github-stories'")
+        conn.commit()
+        conn.close()
+
+        with self.assertRaises(SafetyViolation) as raised:
             announce_doc_edit(
                 story_issue=1,
                 files=["docs/requirements/story-map.md"],
@@ -169,6 +214,7 @@ class WorkflowFilterTests(unittest.TestCase):
                 apply=True,
                 confirm=True,
             )
+        self.assertIn("Run loaring_sync_stories", str(raised.exception))
 
     @patch("loaring_ops.workflow.subprocess.run")
     def test_validate_checkout_target_blocks_wrong_repo_for_frontend(self, run) -> None:
@@ -260,6 +306,125 @@ class WorkflowFilterTests(unittest.TestCase):
 
         self.assertEqual(develop["apiSpecs"][0]["path"], "docs/api/develop.api-spec.json")
         self.assertEqual(feature["apiSpecs"][0]["path"], "docs/api/feature.api-spec.json")
+
+    def test_resolve_contract_target_maps_legacy_story_to_canonical_contract(self) -> None:
+        conn = connect()
+        self._insert_figure_storyline_contract_fixture(conn)
+        conn.commit()
+        conn.close()
+
+        result = resolve_contract_target(story_issue=370)
+
+        self.assertEqual(result["canonicalRepo"], "loaring-story/loaring-product")
+        self.assertEqual(result["canonicalStoryIssue"], 3)
+        self.assertEqual(result["requirementId"], "REQ-FIGURE-002")
+        self.assertEqual(result["apiSpecPath"], "docs/api/370-figure-storyline.api-spec.json")
+        self.assertEqual(
+            result["endpointIds"],
+            ["figure.storyline.create", "figure.storyline.update", "figure.storyline.delete"],
+        )
+        self.assertEqual(result["legacyIssueReferences"][0]["issue"], 370)
+        self.assertIn(result["confidence"], {"high", "medium"})
+
+    def test_resolve_contract_target_from_spec_path(self) -> None:
+        conn = connect()
+        self._insert_figure_storyline_contract_fixture(conn)
+        conn.commit()
+        conn.close()
+
+        result = resolve_contract_target(api_spec_path="docs/api/370-figure-storyline.api-spec.json")
+
+        self.assertEqual(result["canonicalStoryIssue"], 3)
+        self.assertEqual(result["requirementId"], "REQ-FIGURE-002")
+        self.assertEqual(result["endpointIds"][0], "figure.storyline.create")
+
+    def test_get_api_spec_returns_request_response_schema_summary(self) -> None:
+        conn = connect()
+        self._insert_figure_storyline_contract_fixture(conn)
+        conn.commit()
+        conn.close()
+
+        result = get_api_spec(path="docs/api/370-figure-storyline.api-spec.json", endpoint_id="figure.storyline.create")
+
+        self.assertEqual(result["path"], "docs/api/370-figure-storyline.api-spec.json")
+        self.assertEqual(len(result["endpoints"]), 1)
+        endpoint = result["endpoints"][0]
+        self.assertEqual(endpoint["request"]["bodySchema"], "StorylineCreateRequest")
+        self.assertEqual(endpoint["response"]["bodySchema"], "StorylineResponse")
+        self.assertEqual(endpoint["request"]["body"]["fields"][0]["name"], "content")
+        self.assertIn("등록 성공 시", result["uiRules"][0])
+
+    def test_extract_bottleneck_events_records_only_structured_bottlenecks(self) -> None:
+        normal = extract_bottleneck_events(
+            "loaring_resolve_contract_target",
+            {"storyIssue": 370},
+            {"canonicalStoryIssue": 3, "confidence": "high", "warnings": []},
+            None,
+            5,
+        )
+        ambiguous = extract_bottleneck_events(
+            "loaring_resolve_contract_target",
+            {"storyIssue": 370},
+            {
+                "canonicalStoryIssue": 3,
+                "confidence": "medium",
+                "warnings": ["Multiple plausible contract targets matched; use candidates to disambiguate."],
+            },
+            None,
+            5,
+        )
+
+        self.assertEqual(normal, [])
+        self.assertEqual(ambiguous[0]["eventType"], "target_resolution_ambiguous")
+        self.assertEqual(ambiguous[0]["storyIssue"], 370)
+
+    def test_call_tool_logs_missing_api_spec_snapshot_without_blocking_result(self) -> None:
+        result = call_tool("loaring_get_api_spec", {"path": "docs/api/missing.api-spec.json"})
+        report = weekly_bottleneck_report()
+
+        self.assertEqual(result["status"], "missing")
+        self.assertEqual(report["eventCount"], 1)
+        self.assertEqual(report["events"][0]["eventType"], "missing_api_spec_snapshot")
+
+    def test_weekly_bottleneck_report_groups_events_and_recommends_fixes(self) -> None:
+        insert_events(
+            [
+                {
+                    "id": "event-1",
+                    "occurredAt": now_iso(),
+                    "toolName": "loaring_resolve_contract_target",
+                    "eventType": "target_resolution_ambiguous",
+                    "repo": "loaring-story/loaring-product",
+                    "storyIssue": 370,
+                    "apiSpecPath": "docs/api/370-figure-storyline.api-spec.json",
+                    "apply": False,
+                    "durationMs": 7,
+                    "warningCount": 1,
+                    "blockerCount": 0,
+                    "summary": "ambiguous",
+                    "details": {"warnings": ["ambiguous"]},
+                },
+                {
+                    "id": "event-2",
+                    "occurredAt": now_iso(),
+                    "toolName": "loaring_get_api_spec",
+                    "eventType": "missing_api_spec_snapshot",
+                    "repo": "loaring-story/loaring-product",
+                    "apply": False,
+                    "durationMs": 4,
+                    "warningCount": 1,
+                    "blockerCount": 0,
+                    "summary": "missing",
+                    "details": {},
+                },
+            ]
+        )
+
+        report = weekly_bottleneck_report(repo="loaring-story/loaring-product")
+
+        self.assertEqual(report["eventCount"], 2)
+        self.assertEqual(report["byEventType"]["target_resolution_ambiguous"], 1)
+        self.assertIn("Add canonical aliases", report["recommendedFixes"][0])
 
     def test_init_db_migrates_legacy_product_index_scope(self) -> None:
         conn = sqlite3.connect(":memory:")
@@ -368,6 +533,129 @@ class WorkflowFilterTests(unittest.TestCase):
             """,
             (ref, path, title, now_iso()),
         )
+
+    def _insert_figure_storyline_contract_fixture(self, conn) -> None:
+        conn.execute(
+            "UPDATE stories SET title = ?, body = ? WHERE repo = ? AND issue_number = 3",
+            (
+                "[Story] 인물 스토리라인 등록·수정·삭제",
+                "REQ-FIGURE-002",
+                "loaring-story/loaring-product",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO stories (
+              repo, issue_number, title, state, url, labels_json,
+              assignees_json, body, updated_at, synced_at
+            )
+            VALUES (
+              'loaring-story/loaring-sotry', 370, '[Story] 인물 스토리라인 등록·수정·삭제',
+              'open', 'https://github.com/loaring-story/loaring-sotry/issues/370',
+              '[]', '[]', 'legacy', '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z'
+            )
+            """
+        )
+        endpoints = [
+            {"id": "figure.storyline.create", "changePolicy": "contract-review-required"},
+            {"id": "figure.storyline.update", "changePolicy": "contract-review-required"},
+            {"id": "figure.storyline.delete", "changePolicy": "contract-review-required"},
+        ]
+        path = "docs/api/370-figure-storyline.api-spec.json"
+        conn.execute(
+            """
+            INSERT INTO api_specs (
+              repo, ref, path, domain, title, story_issue, requirement_ids_json,
+              endpoints_json, lifecycle, updated_at
+            )
+            VALUES (
+              'loaring-story/loaring-product', 'develop', ?, 'figure',
+              '인물 스토리라인 등록·수정·삭제 API 명세', 3, ?, ?, 'accepted', ?
+            )
+            """,
+            (path, json.dumps(["REQ-FIGURE-002"]), json.dumps(endpoints), now_iso()),
+        )
+        conn.execute(
+            """
+            INSERT INTO requirements (
+              repo, ref, requirement_id, title, status, epic,
+              story_issues_json, api_specs_json, updated_at
+            )
+            VALUES (
+              'loaring-story/loaring-product', 'develop', 'REQ-FIGURE-002',
+              '인물 스토리라인 등록·수정·삭제', 'accepted', 'Figure',
+              '[3]', ?, ?
+            )
+            """,
+            (json.dumps([path]), now_iso()),
+        )
+        conn.execute(
+            """
+            INSERT INTO product_snapshots (repo, ref, path, sha, content, fetched_at)
+            VALUES ('loaring-story/loaring-product', 'develop', ?, 'sha', ?, ?)
+            """,
+            (path, json.dumps(self._figure_storyline_spec(), ensure_ascii=False), now_iso()),
+        )
+
+    def _figure_storyline_spec(self) -> dict:
+        return {
+            "schemaVersion": "1.0",
+            "meta": {"title": "인물 스토리라인 등록·수정·삭제 API 명세", "story": {"issue": 3}},
+            "schemas": {
+                "StorylineCreateRequest": {
+                    "type": "object",
+                    "required": ["content"],
+                    "properties": {
+                        "content": {"type": "string", "constraints": ["notBlank", "length:1..5000"]},
+                        "imageUrl": {"type": "string", "constraints": ["url"]},
+                    },
+                },
+                "StorylineResponse": {
+                    "type": "object",
+                    "required": ["id", "figureId", "content"],
+                    "properties": {
+                        "id": {"type": "number"},
+                        "figureId": {"type": "number"},
+                        "content": {"type": "string"},
+                    },
+                },
+            },
+            "endpoints": [
+                {
+                    "id": "figure.storyline.create",
+                    "method": "POST",
+                    "path": "/api/figures/{figureId}/storylines",
+                    "request": {
+                        "contentType": "application/json",
+                        "pathParams": {"figureId": {"type": "number", "required": True}},
+                        "queryParams": {},
+                        "bodySchema": "StorylineCreateRequest",
+                        "example": {"content": "text"},
+                    },
+                    "response": {"httpStatus": 201, "code": "0001", "bodySchema": "StorylineResponse"},
+                    "errors": ["GLOBAL_002", "FIGURE_001"],
+                    "consumerGuidance": {"schemaNames": ["StorylineCreateRequest"], "uiRules": ["등록 성공 시 목록을 갱신한다."]},
+                },
+                {
+                    "id": "figure.storyline.update",
+                    "method": "PATCH",
+                    "path": "/api/figures/{figureId}/storylines/{storylineId}",
+                    "request": {"bodySchema": "StorylineCreateRequest"},
+                    "response": {"httpStatus": 200, "code": "0002", "bodySchema": "StorylineResponse"},
+                    "errors": ["STORYLINE_001"],
+                },
+                {
+                    "id": "figure.storyline.delete",
+                    "method": "DELETE",
+                    "path": "/api/figures/{figureId}/storylines/{storylineId}",
+                    "request": {"bodySchema": None},
+                    "response": {"httpStatus": 204, "code": "0003", "bodySchema": None},
+                    "errors": ["STORYLINE_001"],
+                },
+            ],
+            "errorCodes": [{"code": "GLOBAL_002", "httpStatus": 400}],
+            "validationChecks": {"provider": ["validate content"], "consumer": ["refresh list"], "qa": ["create"]},
+        }
 
     def _inference(self, story_issue: int, repo: str, number: int) -> dict:
         return {

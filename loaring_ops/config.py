@@ -13,6 +13,7 @@ DEFAULT_REF = "develop"
 DEFAULT_PROJECT_NUMBER = 7
 DEFAULT_DATA_DIR = Path.home() / ".codex" / "loaring-product-ops"
 DEFAULT_DB_PATH = DEFAULT_DATA_DIR / "loaring-product-ops.sqlite"
+DEFAULT_TELEMETRY_DB_PATH = DEFAULT_DATA_DIR / "loaring-product-ops-telemetry.sqlite"
 
 
 PRODUCT_PATHS = [
@@ -31,6 +32,13 @@ def db_path() -> Path:
     if configured:
         return Path(configured).expanduser()
     return DEFAULT_DB_PATH
+
+
+def telemetry_db_path() -> Path:
+    configured = os.environ.get("LOARING_PRODUCT_OPS_TELEMETRY_DB")
+    if configured:
+        return Path(configured).expanduser()
+    return DEFAULT_TELEMETRY_DB_PATH
 
 
 def repo_name(repo: str | None = None) -> str:

@@ -6,9 +6,9 @@ import re
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
-from .config import PRODUCT_PATHS, project_number, repo_name, repo_ref, story_repo_name
+from .config import PRODUCT_PATHS, legacy_story_repos, project_number, repo_name, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import fetch_file
 from .safety import operation_lock
@@ -265,6 +265,264 @@ def get_contract(
         "requirementId": requirement_id,
         "requirements": requirements,
         "apiSpecs": dedupe_by_path(specs),
+    }
+
+
+def resolve_contract_target(
+    query: str | None = None,
+    story_issue: int | None = None,
+    requirement_id: str | None = None,
+    api_spec_path: str | None = None,
+    repo: str | None = None,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    """Resolve legacy Story/API/requirement hints to one product contract target."""
+    selected_repo = repo_name(repo)
+    selected_ref = repo_ref(ref)
+    selected_story_repo = story_repo_name(None if repo == selected_repo else repo)
+    selected_project = project_number(None)
+    conn = connect()
+    init_db(conn)
+
+    warnings: list[str] = []
+    candidate_map: dict[tuple[int | None, str | None, str | None], dict[str, Any]] = {}
+
+    def add_candidate(
+        canonical_story: int | None,
+        req_id: str | None,
+        spec_path: str | None,
+        score: int,
+        reasons: list[str],
+        legacy_refs: list[dict[str, Any]] | None = None,
+    ) -> None:
+        key = (canonical_story, req_id, spec_path)
+        current = candidate_map.get(key)
+        if current is None:
+            candidate_map[key] = {
+                "canonicalStoryIssue": canonical_story,
+                "requirementId": req_id,
+                "apiSpecPath": spec_path,
+                "score": score,
+                "reasons": reasons,
+                "legacyIssueReferences": legacy_refs or [],
+            }
+            return
+        current["score"] += score
+        current["reasons"].extend(reasons)
+        current["legacyIssueReferences"] = dedupe_issue_refs(current["legacyIssueReferences"] + (legacy_refs or []))
+
+    if api_spec_path:
+        spec = api_spec_by_path(conn, selected_repo, selected_ref, api_spec_path)
+        if spec:
+            for req_id in spec.get("requirement_ids") or [None]:
+                add_candidate(spec.get("story_issue"), req_id, spec.get("path"), 100, ["matched apiSpecPath"])
+        else:
+            warnings.append(f"No cached API spec index found for {api_spec_path}.")
+
+    if requirement_id:
+        req = requirement_by_id(conn, selected_repo, selected_ref, requirement_id)
+        if req:
+            for path in req.get("api_specs") or [None]:
+                linked_spec = api_spec_by_path(conn, selected_repo, selected_ref, path) if path else None
+                story_values = req.get("story_issues") or [None]
+                for issue in story_values:
+                    add_candidate(
+                        linked_spec.get("story_issue") if linked_spec else issue,
+                        req.get("requirement_id"),
+                        path,
+                        95,
+                        ["matched requirementId"],
+                    )
+        else:
+            warnings.append(f"No cached requirement found for {requirement_id}.")
+
+    if story_issue is not None:
+        for spec in api_specs_by_story(conn, selected_repo, selected_ref, story_issue):
+            for req_id in spec.get("requirement_ids") or [None]:
+                add_candidate(story_issue, req_id, spec.get("path"), 90, ["matched product Story issue"])
+        for req in requirements_by_story(conn, selected_repo, selected_ref, story_issue):
+            for path in req.get("api_specs") or [None]:
+                add_candidate(story_issue, req.get("requirement_id"), path, 85, ["matched traceability Story issue"])
+
+        primary_story = latest_story(conn, selected_story_repo, story_issue)
+        if primary_story:
+            add_candidates_from_story_title(
+                conn,
+                selected_repo,
+                selected_ref,
+                selected_story_repo,
+                primary_story,
+                story_issue,
+                add_candidate,
+                ["matched cached product Story"],
+                70,
+            )
+        else:
+            legacy_ref = find_legacy_story(conn, story_issue)
+            if legacy_ref:
+                add_candidates_from_story_title(
+                    conn,
+                    selected_repo,
+                    selected_ref,
+                    selected_story_repo,
+                    legacy_ref,
+                    story_issue,
+                    add_candidate,
+                    ["mapped legacy Story by normalized title"],
+                    80,
+                )
+            else:
+                warnings.append(f"No cached product or legacy Story found for issue #{story_issue}.")
+
+    if query:
+        like = f"%{query}%"
+        for spec_row in conn.execute(
+            """
+            SELECT * FROM api_specs
+            WHERE repo = ? AND ref = ?
+              AND (path LIKE ? OR title LIKE ? OR domain LIKE ? OR endpoints_json LIKE ? OR requirement_ids_json LIKE ?)
+            ORDER BY updated_at DESC
+            LIMIT 20
+            """,
+            (selected_repo, selected_ref, like, like, like, like, like),
+        ).fetchall():
+            spec = decode_json_fields(dict(spec_row))
+            for req_id in spec.get("requirement_ids") or [None]:
+                add_candidate(spec.get("story_issue"), req_id, spec.get("path"), 45, ["matched API catalog query"])
+        for req_row in conn.execute(
+            """
+            SELECT * FROM requirements
+            WHERE repo = ? AND ref = ?
+              AND (requirement_id LIKE ? OR title LIKE ? OR epic LIKE ? OR api_specs_json LIKE ?)
+            ORDER BY updated_at DESC
+            LIMIT 20
+            """,
+            (selected_repo, selected_ref, like, like, like, like),
+        ).fetchall():
+            req = decode_json_fields(dict(req_row))
+            for issue in req.get("story_issues") or [None]:
+                for path in req.get("api_specs") or [None]:
+                    add_candidate(issue, req.get("requirement_id"), path, 40, ["matched traceability query"])
+        for story_row in cached_story_query(conn, selected_story_repo, query, 20):
+            story = decode_cached_story(dict(story_row))
+            add_candidates_from_story_title(
+                conn,
+                selected_repo,
+                selected_ref,
+                selected_story_repo,
+                story,
+                story.get("issue_number"),
+                add_candidate,
+                ["matched cached Story query"],
+                35,
+            )
+
+    candidates = [
+        enrich_contract_candidate(conn, item, selected_repo, selected_ref, selected_story_repo, selected_project)
+        for item in candidate_map.values()
+    ]
+    candidates.sort(key=lambda item: item["score"], reverse=True)
+    selected = candidates[0] if candidates else None
+    if len(candidates) > 1:
+        top_score = candidates[0]["score"]
+        ambiguous = [item for item in candidates if item["score"] >= top_score - 20]
+        if len(ambiguous) > 1:
+            warnings.append("Multiple plausible contract targets matched; use candidates to disambiguate.")
+    confidence = candidate_confidence(candidates)
+    return {
+        "repo": selected_repo,
+        "ref": selected_ref,
+        "canonicalRepo": selected_repo,
+        "canonicalStoryIssue": None if selected is None else selected.get("canonicalStoryIssue"),
+        "legacyIssueReferences": [] if selected is None else selected.get("legacyIssueReferences", []),
+        "requirementId": None if selected is None else selected.get("requirementId"),
+        "apiSpecPath": None if selected is None else selected.get("apiSpecPath"),
+        "apiSpec": None if selected is None else selected.get("apiSpec"),
+        "endpointIds": [] if selected is None else selected.get("endpointIds", []),
+        "projectFields": None if selected is None else selected.get("projectFields"),
+        "confidence": confidence,
+        "warnings": warnings,
+        "candidates": candidates[:10],
+    }
+
+
+def get_api_spec(
+    path: str | None = None,
+    story_issue: int | None = None,
+    requirement_id: str | None = None,
+    endpoint_id: str | None = None,
+    repo: str | None = None,
+    ref: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    selected_repo = repo_name(repo)
+    selected_ref = repo_ref(ref)
+    resolved_path = path
+    warnings: list[str] = []
+    if resolved_path is None:
+        resolved = resolve_contract_target(
+            story_issue=story_issue,
+            requirement_id=requirement_id,
+            query=endpoint_id,
+            repo=selected_repo,
+            ref=selected_ref,
+        )
+        resolved_path = resolved.get("apiSpecPath")
+        warnings.extend(resolved.get("warnings") or [])
+    conn = connect()
+    init_db(conn)
+    spec_index = api_spec_by_path(conn, selected_repo, selected_ref, resolved_path) if resolved_path else None
+    if spec_index:
+        resolved_path = spec_index.get("path")
+    content = snapshot(conn, resolved_path, selected_repo, selected_ref) if resolved_path else None
+    parsed = parse_api_spec_json(content)
+    if not resolved_path or not parsed:
+        return {
+            "repo": selected_repo,
+            "ref": selected_ref,
+            "path": resolved_path,
+            "status": "missing",
+            "warnings": warnings + ["No cached api-spec JSON snapshot found."],
+            "rawJsonAvailable": bool(content),
+        }
+
+    endpoints = parsed.get("endpoints") if isinstance(parsed.get("endpoints"), list) else []
+    if endpoint_id:
+        endpoints = [item for item in endpoints if isinstance(item, dict) and item.get("id") == endpoint_id]
+        if not endpoints:
+            warnings.append(f"No endpoint matched endpointId={endpoint_id}.")
+    schema_defs = parsed.get("schemas") if isinstance(parsed.get("schemas"), dict) else {}
+    endpoint_summaries = [summarize_endpoint(item, schema_defs) for item in endpoints if isinstance(item, dict)]
+    validation = parsed.get("validationChecks") if isinstance(parsed.get("validationChecks"), dict) else {}
+    return {
+        "repo": selected_repo,
+        "ref": selected_ref,
+        "path": resolved_path,
+        "lifecycle": (spec_index or {}).get("lifecycle"),
+        "title": ((parsed.get("meta") or {}).get("title") if isinstance(parsed.get("meta"), dict) else None)
+        or (spec_index or {}).get("title"),
+        "storyIssue": (spec_index or {}).get("story_issue"),
+        "requirementIds": (spec_index or {}).get("requirement_ids", []),
+        "endpoints": endpoint_summaries,
+        "requestSchemas": [item["request"] for item in endpoint_summaries],
+        "responseSchemas": [item["response"] for item in endpoint_summaries],
+        "errors": parsed.get("errorCodes") or [],
+        "responseCodes": parsed.get("responseCodes") or [],
+        "validationRules": validation,
+        "consumerGuidance": [
+            {"endpointId": item.get("id"), **(item.get("consumerGuidance") or {})}
+            for item in endpoints
+            if isinstance(item, dict) and item.get("consumerGuidance")
+        ],
+        "uiRules": [
+            rule
+            for item in endpoints
+            if isinstance(item, dict)
+            for rule in ((item.get("consumerGuidance") or {}).get("uiRules") or [])
+        ],
+        "rawJsonAvailable": True,
+        "rawJson": parsed if include_raw else None,
+        "warnings": warnings,
     }
 
 
@@ -587,6 +845,270 @@ def minimal_story(story: dict[str, Any] | None) -> dict[str, Any] | None:
         "labels": story.get("labels"),
         "assignees": story.get("assignees"),
     }
+
+
+def api_spec_by_path(conn: sqlite3.Connection, repo: str, ref: str, path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    row = conn.execute(
+        "SELECT * FROM api_specs WHERE repo = ? AND ref = ? AND path = ?",
+        (repo, ref, path),
+    ).fetchone()
+    if row is None and "/" not in path:
+        row = conn.execute(
+            "SELECT * FROM api_specs WHERE repo = ? AND ref = ? AND path LIKE ? ORDER BY updated_at DESC LIMIT 1",
+            (repo, ref, f"%/{path}"),
+        ).fetchone()
+    return decode_json_fields(dict(row)) if row else None
+
+
+def api_specs_by_story(conn: sqlite3.Connection, repo: str, ref: str, story_issue: int) -> list[dict[str, Any]]:
+    return [
+        decode_json_fields(dict(row))
+        for row in conn.execute(
+            "SELECT * FROM api_specs WHERE repo = ? AND ref = ? AND story_issue = ?",
+            (repo, ref, story_issue),
+        ).fetchall()
+    ]
+
+
+def requirement_by_id(conn: sqlite3.Connection, repo: str, ref: str, requirement_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        "SELECT * FROM requirements WHERE repo = ? AND ref = ? AND requirement_id = ?",
+        (repo, ref, requirement_id),
+    ).fetchone()
+    return decode_json_fields(dict(row)) if row else None
+
+
+def requirements_by_story(conn: sqlite3.Connection, repo: str, ref: str, story_issue: int) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for row in conn.execute("SELECT * FROM requirements WHERE repo = ? AND ref = ?", (repo, ref)).fetchall():
+        req = decode_json_fields(dict(row))
+        if story_issue in req.get("story_issues", []):
+            result.append(req)
+    return result
+
+
+def find_legacy_story(conn: sqlite3.Connection, issue_number: int) -> dict[str, Any] | None:
+    for legacy_repo in legacy_story_repos():
+        story = latest_story(conn, legacy_repo, issue_number)
+        if story:
+            story["repo"] = legacy_repo
+            return story
+    return None
+
+
+def cached_story_query(conn: sqlite3.Connection, primary_repo: str, query: str, limit: int) -> list[sqlite3.Row]:
+    repos = [primary_repo]
+    repos.extend(item for item in legacy_story_repos() if item not in repos)
+    like = f"%{query}%"
+    return conn.execute(
+        """
+        SELECT * FROM stories
+        WHERE repo IN (%s) AND (title LIKE ? OR body LIKE ?)
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """ % ",".join("?" for _ in repos),
+        (*repos, like, like, limit),
+    ).fetchall()
+
+
+def decode_cached_story(row: dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    data["labels"] = json.loads(data.pop("labels_json") or "[]")
+    data["assignees"] = json.loads(data.pop("assignees_json") or "[]")
+    return data
+
+
+def add_candidates_from_story_title(
+    conn: sqlite3.Connection,
+    product_repo: str,
+    ref: str,
+    primary_story_repo: str,
+    story: dict[str, Any],
+    input_issue: int | None,
+    add_candidate: Callable[[int | None, str | None, str | None, int, list[str], list[dict[str, Any]] | None], None],
+    reasons: list[str],
+    score: int,
+) -> None:
+    title = normalize_story_title(str(story.get("title") or ""))
+    if not title:
+        return
+    primary_matches = conn.execute(
+        "SELECT * FROM stories WHERE repo = ?",
+        (primary_story_repo,),
+    ).fetchall()
+    legacy_refs: list[dict[str, Any]] = []
+    story_repo = str(story.get("repo") or "")
+    if story_repo in legacy_story_repos() or (input_issue is not None and story.get("issue_number") != input_issue):
+        legacy_refs.append(
+            {
+                "repo": story_repo or None,
+                "issue": input_issue or story.get("issue_number"),
+                "title": story.get("title"),
+                "mappedBy": "normalized-title",
+            }
+        )
+    for row in primary_matches:
+        primary = decode_cached_story(dict(row))
+        if normalize_story_title(str(primary.get("title") or "")) != title:
+            continue
+        canonical_issue = int(primary["issue_number"])
+        refs = list(legacy_refs)
+        if input_issue is not None and input_issue != canonical_issue:
+            refs.append(
+                {
+                    "repo": story_repo or find_legacy_repo_for_issue(conn, input_issue),
+                    "issue": input_issue,
+                    "title": story.get("title"),
+                    "mappedTo": f"{primary_story_repo}#{canonical_issue}",
+                    "mappedBy": "normalized-title",
+                }
+            )
+        specs = api_specs_by_story(conn, product_repo, ref, canonical_issue)
+        reqs = requirements_by_story(conn, product_repo, ref, canonical_issue)
+        for spec in specs:
+            for req_id in spec.get("requirement_ids") or [None]:
+                add_candidate(canonical_issue, req_id, spec.get("path"), score, reasons, refs)
+        for req in reqs:
+            for path in req.get("api_specs") or [None]:
+                add_candidate(canonical_issue, req.get("requirement_id"), path, score - 5, reasons, refs)
+
+
+def find_legacy_repo_for_issue(conn: sqlite3.Connection, issue_number: int) -> str | None:
+    for legacy_repo in legacy_story_repos():
+        if latest_story(conn, legacy_repo, issue_number):
+            return legacy_repo
+    return None
+
+
+def enrich_contract_candidate(
+    conn: sqlite3.Connection,
+    candidate: dict[str, Any],
+    repo: str,
+    ref: str,
+    story_repo: str,
+    selected_project: int,
+) -> dict[str, Any]:
+    spec = api_spec_by_path(conn, repo, ref, candidate.get("apiSpecPath"))
+    story_issue = candidate.get("canonicalStoryIssue")
+    parsed = parse_api_spec_json(snapshot(conn, candidate.get("apiSpecPath") or "", repo, ref))
+    endpoints = spec.get("endpoints", []) if spec else []
+    endpoint_ids = [item.get("id") for item in endpoints if isinstance(item, dict) and item.get("id")]
+    project_fields = latest_project_fields(conn, story_repo, selected_project, story_issue) if story_issue else {}
+    return {
+        **candidate,
+        "canonicalRepo": repo,
+        "apiSpec": None
+        if spec is None
+        else {
+            "path": spec.get("path"),
+            "title": spec.get("title")
+            or ((parsed.get("meta") or {}).get("title") if isinstance(parsed.get("meta"), dict) else None),
+            "domain": spec.get("domain"),
+            "lifecycle": spec.get("lifecycle"),
+        },
+        "endpointIds": endpoint_ids,
+        "projectFields": project_fields,
+        "legacyIssueReferences": dedupe_issue_refs(candidate.get("legacyIssueReferences", [])),
+    }
+
+
+def dedupe_issue_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[Any, Any]] = set()
+    result: list[dict[str, Any]] = []
+    for ref in refs:
+        key = (ref.get("repo"), ref.get("issue"))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(ref)
+    return result
+
+
+def candidate_confidence(candidates: list[dict[str, Any]]) -> str:
+    if not candidates:
+        return "none"
+    if len(candidates) == 1:
+        return "high" if candidates[0]["score"] >= 80 else "medium"
+    if candidates[0]["score"] - candidates[1]["score"] >= 30:
+        return "high"
+    if candidates[0]["score"] >= 80:
+        return "medium"
+    return "low"
+
+
+def summarize_endpoint(endpoint: dict[str, Any], schemas: dict[str, Any]) -> dict[str, Any]:
+    request = endpoint.get("request") if isinstance(endpoint.get("request"), dict) else {}
+    response = endpoint.get("response") if isinstance(endpoint.get("response"), dict) else {}
+    request_schema = request.get("bodySchema")
+    response_schema = response.get("bodySchema")
+    return {
+        "id": endpoint.get("id"),
+        "method": endpoint.get("method"),
+        "path": endpoint.get("path"),
+        "summary": endpoint.get("summary"),
+        "auth": endpoint.get("auth"),
+        "request": {
+            "contentType": request.get("contentType"),
+            "pathParams": summarize_params(request.get("pathParams")),
+            "queryParams": summarize_params(request.get("queryParams")),
+            "bodySchema": request_schema,
+            "body": summarize_schema_ref(request_schema, schemas),
+            "exampleAvailable": request.get("example") is not None,
+        },
+        "response": {
+            "httpStatus": response.get("httpStatus"),
+            "code": response.get("code"),
+            "bodySchema": response_schema,
+            "body": summarize_schema_ref(response_schema, schemas),
+            "exampleAvailable": response.get("example") is not None,
+        },
+        "errors": endpoint.get("errors") or [],
+        "consumerGuidance": endpoint.get("consumerGuidance") or {},
+    }
+
+
+def summarize_params(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: {
+            "type": item.get("type") if isinstance(item, dict) else None,
+            "required": item.get("required") if isinstance(item, dict) else None,
+        }
+        for key, item in value.items()
+    }
+
+
+def summarize_schema_ref(schema_name: Any, schemas: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(schema_name, str) or schema_name not in schemas:
+        return None
+    schema = schemas[schema_name]
+    if not isinstance(schema, dict):
+        return None
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    return {
+        "schema": schema_name,
+        "type": schema.get("type"),
+        "required": schema.get("required") or [],
+        "fields": [
+            {
+                "name": name,
+                "type": details.get("type") if isinstance(details, dict) else None,
+                "format": details.get("format") if isinstance(details, dict) else None,
+                "constraints": (details.get("constraints") or []) if isinstance(details, dict) else [],
+                "description": details.get("description") if isinstance(details, dict) else None,
+            }
+            for name, details in properties.items()
+        ],
+    }
+
+
+def normalize_story_title(value: str) -> str:
+    normalized = value.strip().lower()
+    normalized = re.sub(r"^\[story\]\s*", "", normalized)
+    return re.sub(r"\s+", " ", normalized)
 
 
 def decode_json_fields(row: dict[str, Any]) -> dict[str, Any]:
