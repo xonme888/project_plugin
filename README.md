@@ -22,6 +22,59 @@ loaring-frontend
 
 `loaring-product-ops`는 `loaring-product`, `loaring-backend`, `loaring-frontend` 안에 복사하지 않는다. 팀원은 Codex 환경에 플러그인으로 설치해서 사용한다.
 
+## 설치
+
+이 저장소가 개인 marketplace에 이미 등록된 개발 환경에서는 다음 명령으로 현재 로컬 소스를 재설치한다.
+
+```bash
+codex plugin add loaring-product-ops@personal
+```
+
+팀원 배포는 team marketplace를 기본으로 한다. 별도 marketplace 저장소에서 다음 구조를 사용한다.
+
+```txt
+loaring-codex-marketplace/
+  marketplace.json
+  plugins/
+    loaring-product-ops/
+```
+
+`marketplace.json` 예시:
+
+```json
+{
+  "name": "loaring",
+  "interface": {
+    "displayName": "LoaRing"
+  },
+  "plugins": [
+    {
+      "name": "loaring-product-ops",
+      "source": {
+        "source": "local",
+        "path": "./plugins/loaring-product-ops"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
+```
+
+팀원 설치:
+
+```bash
+git clone https://github.com/xonme888/loaring-codex-marketplace.git
+cd loaring-codex-marketplace
+codex plugin marketplace add .
+codex plugin add loaring-product-ops@loaring
+```
+
+업데이트 후 팀원은 marketplace 저장소에서 `git pull`을 실행한 뒤 같은 `codex plugin add ...` 명령을 다시 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
+
 ## 노출 스킬
 
 | Skill | 책임 |
@@ -142,3 +195,26 @@ python3 scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-
 ```
 
 이 검증은 각 저장소 문서에 monorepo 전제나 상대 경로 결합이 남아 있는지 확인한다.
+
+## 릴리즈 점검
+
+팀에 배포하기 전에 기본 검증을 실행한다.
+
+```bash
+python3 scripts/validate_release.py
+uv run --with pyyaml python /path/to/plugin-creator/scripts/validate_plugin.py .
+```
+
+`validate_release.py`는 다음을 확인한다.
+
+- 필수 plugin 파일 존재 여부
+- `.codex-plugin/plugin.json` 기본 필드
+- MCP `tools/list` 응답과 핵심 도구 노출
+- Python compile 가능 여부
+- 대표적인 token, secret, API key 패턴 포함 여부
+
+이 저장소에는 GitHub token이나 OpenAI key를 저장하지 않는다. GitHub 접근은 설치한 사용자의 `gh` 인증과 권한을 사용한다.
+
+## 라이선스
+
+MIT License. 자세한 내용은 `LICENSE`를 참고한다.

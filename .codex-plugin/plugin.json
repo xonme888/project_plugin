@@ -1,6 +1,6 @@
 {
   "name": "loaring-product-ops",
-  "version": "0.1.0+codex.20260720151801",
+  "version": "0.1.0+codex.20260721035418",
   "description": "Codex plugin for LoaRing product operations: Story intake, requirement analysis, API contracts, and implementation briefs.",
   "author": {
     "name": "LoaRing"
