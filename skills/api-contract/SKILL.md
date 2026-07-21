@@ -22,8 +22,8 @@ Read from `loaring-story/loaring-product@develop` unless the user gives another 
 If `loaring-product` is not cloned, use GitHub, the GitHub connector, or:
 
 ```bash
-python3 scripts/fetch_product_contract.py
-python3 scripts/fetch_product_contract.py --path docs/api/<file>.api-spec.json
+uv run python scripts/fetch_product_contract.py
+uv run python scripts/fetch_product_contract.py --path docs/api/<file>.api-spec.json
 ```
 
 When the LoaRing Product Ops MCP tools are available, prefer them for lookup:

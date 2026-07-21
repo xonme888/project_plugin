@@ -5,12 +5,15 @@ from __future__ import annotations
 import re
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .config import PRODUCT_PATHS, project_number, repo_name, repo_ref, story_repo_name
 from .db import connect, init_db
 from .github_client import fetch_file
+
+
+KST = timezone(timedelta(hours=9), "KST")
 
 
 CONTRACT_READINESS_VALUES = {
@@ -25,7 +28,7 @@ CONTRACT_READINESS_VALUES = {
 
 
 def now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(KST).isoformat()
 
 
 def sync_product(repo: str | None = None, ref: str | None = None) -> dict[str, Any]:

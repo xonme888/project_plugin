@@ -24,11 +24,12 @@ loaring-frontend
 
 ## 설치
 
-이 저장소가 개인 marketplace에 이미 등록된 개발 환경에서는 다음 명령으로 현재 로컬 소스를 재설치한다.
+팀원 런타임 기준:
 
-```bash
-codex plugin add loaring-product-ops@personal
-```
+- Python `3.11`
+- `uv`
+- project metadata의 `requires-python = ">=3.11,<3.12"`
+- MCP runtime dependency는 `uv sync`로 설치한다.
 
 팀원 배포는 team marketplace를 기본으로 한다. 별도 marketplace 저장소에서 다음 구조를 사용한다.
 
@@ -73,6 +74,12 @@ codex plugin marketplace add .
 codex plugin add loaring-product-ops@loaring
 ```
 
+플러그인 소스 검증 또는 로컬 MCP 실행 전에는 marketplace의 `plugins/loaring-product-ops` 경로에서 의존성을 맞춘다.
+
+```bash
+uv sync
+```
+
 업데이트 후 팀원은 marketplace 저장소에서 `git pull`을 실행한 뒤 같은 `codex plugin add ...` 명령을 다시 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
 
 ## 노출 스킬
@@ -100,16 +107,16 @@ codex plugin add loaring-product-ops@loaring
 `gh` 인증이 되어 있으면 product repo를 clone하지 않고 계약 파일을 조회할 수 있다.
 
 ```bash
-python3 scripts/fetch_product_contract.py
-python3 scripts/fetch_product_contract.py --path docs/api/212-auth-signup-login.api-spec.json
-python3 scripts/fetch_product_contract.py --ref docs/123-auth-contract
+uv run python scripts/fetch_product_contract.py
+uv run python scripts/fetch_product_contract.py --path docs/api/212-auth-signup-login.api-spec.json
+uv run python scripts/fetch_product_contract.py --ref docs/123-auth-contract
 ```
 
 기본 조회 대상은 `loaring-story/loaring-product@develop`이다.
 
 ## MCP와 로컬 캐시
 
-패키징된 플러그인은 MCP 서버를 통해 `loaring-product` 조회를 캡슐화한다. Backend나 frontend 저장소에서 플러그인을 실행하는 사용자는 product 저장소 구조를 직접 알 필요 없이 Story/API 계약 메타데이터를 조회할 수 있다.
+패키징된 플러그인은 FastMCP 기반 MCP 서버를 통해 `loaring-product` 조회를 캡슐화한다. Backend나 frontend 저장소에서 플러그인을 실행하는 사용자는 product 저장소 구조를 직접 알 필요 없이 Story/API 계약 메타데이터를 조회할 수 있다.
 
 로컬 sqlite 캐시는 기본적으로 `~/.codex/loaring-product-ops/loaring-product-ops.sqlite`에 저장한다. 이 캐시는 조회 성능, 검색, readiness 점검을 위한 보조 데이터이며 Story/API 계약의 원본이 아니다. 승인된 Story, API spec, registry, Project 결정의 source of truth는 계속 `loaring-product`다.
 
@@ -181,7 +188,7 @@ Contract Readiness 값:
 마이그레이션 전에는 먼저 드라이런 리포트를 만든다.
 
 ```bash
-python3 scripts/migration_dry_run.py
+uv run python scripts/migration_dry_run.py
 ```
 
 이 스크립트는 product docs와 legacy Issue를 조회하지만 GitHub에는 쓰지 않는다. 실제 Issue 생성, Project 필드 복원, `traceability.yml`/`api-catalog.yml` 갱신은 별도 승인 기반 단계로 진행한다.
@@ -191,7 +198,7 @@ python3 scripts/migration_dry_run.py
 ## 독립성 점검
 
 ```bash
-python3 scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-backend /path/to/loaring-frontend
+uv run python scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-backend /path/to/loaring-frontend
 ```
 
 이 검증은 각 저장소 문서에 monorepo 전제나 상대 경로 결합이 남아 있는지 확인한다.
@@ -201,7 +208,7 @@ python3 scripts/audit_independence.py /path/to/loaring-product /path/to/loaring-
 팀에 배포하기 전에 기본 검증을 실행한다.
 
 ```bash
-python3 scripts/validate_release.py
+uv run python scripts/validate_release.py
 uv run --with pyyaml python /path/to/plugin-creator/scripts/validate_plugin.py .
 ```
 
@@ -209,7 +216,9 @@ uv run --with pyyaml python /path/to/plugin-creator/scripts/validate_plugin.py .
 
 - 필수 plugin 파일 존재 여부
 - `.codex-plugin/plugin.json` 기본 필드
-- MCP `tools/list` 응답과 핵심 도구 노출
+- Python `3.11` runtime과 `requires-python = ">=3.11,<3.12"` 정책
+- FastMCP dependency import 가능 여부
+- MCP `tools/list` 응답, schema/handler 일치, 대표 `tools/call`
 - Python compile 가능 여부
 - 대표적인 token, secret, API key 패턴 포함 여부
 
