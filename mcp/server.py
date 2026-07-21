@@ -23,7 +23,7 @@ class LoaringTool(Tool):
 
 
 def build_server() -> FastMCP:
-    server = FastMCP(name="loaring-product-ops", version="0.1.0")
+    server = FastMCP(name="loaring-product-ops", version="0.1.3")
     for name, definition in TOOLS.items():
         server.add_tool(
             LoaringTool(
