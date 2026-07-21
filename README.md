@@ -31,7 +31,7 @@ loaring-frontend
 - Python은 직접 설치하지 않고 `uv`가 관리한다.
 - MCP runtime dependency는 플러그인 실행 시 `uv run`으로 맞춘다.
 
-팀원 배포는 이 저장소를 team marketplace root로 등록하는 방식을 기본으로 한다.
+팀원 배포는 이 GitHub 저장소를 Codex Git marketplace로 등록하는 방식을 기본으로 한다. Codex는 GitHub URL을 직접 매 task에서 읽지 않고, marketplace snapshot을 로컬에 갱신한 뒤 version별 plugin cache를 로드한다.
 
 ```txt
 project_plugin/
@@ -77,26 +77,40 @@ project_plugin/
 curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh | bash
 ```
 
-기본 설치 위치는 `~/.codex/plugin-sources/loaring-product-ops`다. 다른 위치가 필요하면 `LOARING_PRODUCT_OPS_DIR`를 지정한다.
+이 스크립트는 아래 동작을 수행한다.
 
-```bash
-LOARING_PRODUCT_OPS_DIR="$HOME/dev/loaring-product-ops" bash -c "$(curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh)"
-```
-
-직접 clone해서 설치:
-
-```bash
-git clone https://github.com/xonme888/project_plugin.git
-cd project_plugin
-./install.sh
+```txt
+GitHub project_plugin@develop
+  -> codex plugin marketplace add https://github.com/xonme888/project_plugin.git --ref develop
+  -> codex plugin marketplace upgrade loaring
+  -> codex plugin add loaring-product-ops@loaring
+  -> ~/.codex/plugins/cache/loaring/loaring-product-ops/<version>
 ```
 
 수동 설치가 필요하면 같은 작업을 아래 명령으로 실행한다.
 
 ```bash
-codex plugin marketplace add .
+codex plugin marketplace add https://github.com/xonme888/project_plugin.git --ref develop
+codex plugin marketplace upgrade loaring
 codex plugin add loaring-product-ops@loaring
 ```
+
+이미 `loaring` marketplace가 등록된 팀원은 업데이트 때 아래 두 명령만 실행한다.
+
+```bash
+codex plugin marketplace upgrade loaring
+codex plugin add loaring-product-ops@loaring
+```
+
+설치 확인:
+
+```bash
+codex plugin list
+```
+
+정상 상태는 `loaring-product-ops@loaring`이 `installed, enabled`로 표시되고, cache 경로가 `~/.codex/plugins/cache/loaring/loaring-product-ops/<version>` 형태다. `personal` marketplace에 같은 플러그인을 설치하지 않는다.
+
+직접 clone한 개발 checkout을 임시로 설치해야 할 때만 저장소 root의 `./install.sh`를 사용한다. 팀원 배포와 일반 업데이트는 Git marketplace 방식을 기준으로 한다.
 
 플러그인 소스 검증 또는 로컬 MCP 실행을 직접 확인할 때만 저장소 root에서 의존성을 맞춘다.
 
@@ -104,7 +118,7 @@ codex plugin add loaring-product-ops@loaring
 uv sync
 ```
 
-업데이트 후 팀원은 marketplace 저장소에서 `git pull`을 실행한 뒤 `./install.sh`를 다시 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
+업데이트 후 팀원은 `codex plugin marketplace upgrade loaring`과 `codex plugin add loaring-product-ops@loaring`을 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
 
 ## 노출 스킬
 
