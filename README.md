@@ -26,10 +26,10 @@ loaring-frontend
 
 팀원 런타임 기준:
 
-- Python `3.11`
 - `uv`
 - project metadata의 `requires-python = ">=3.11,<3.12"`
-- MCP runtime dependency는 `uv sync`로 설치한다.
+- Python은 직접 설치하지 않고 `uv`가 관리한다.
+- MCP runtime dependency는 플러그인 실행 시 `uv run`으로 맞춘다.
 
 팀원 배포는 이 저장소를 team marketplace root로 등록하는 방식을 기본으로 한다.
 
@@ -74,17 +74,23 @@ project_plugin/
 ```bash
 git clone https://github.com/xonme888/project_plugin.git
 cd project_plugin
+./install.sh
+```
+
+수동 설치가 필요하면 같은 작업을 아래 명령으로 실행한다.
+
+```bash
 codex plugin marketplace add .
 codex plugin add loaring-product-ops@loaring
 ```
 
-플러그인 소스 검증 또는 로컬 MCP 실행 전에는 저장소 root에서 의존성을 맞춘다.
+플러그인 소스 검증 또는 로컬 MCP 실행을 직접 확인할 때만 저장소 root에서 의존성을 맞춘다.
 
 ```bash
 uv sync
 ```
 
-업데이트 후 팀원은 marketplace 저장소에서 `git pull`을 실행한 뒤 같은 `codex plugin add ...` 명령을 다시 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
+업데이트 후 팀원은 marketplace 저장소에서 `git pull`을 실행한 뒤 `./install.sh`를 다시 실행한다. Codex가 새 skill과 MCP 도구를 읽도록 새 task에서 테스트한다.
 
 ## 노출 스킬
 
