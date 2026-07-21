@@ -71,6 +71,20 @@ project_plugin/
 
 팀원 설치:
 
+원라인 설치:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh | bash
+```
+
+기본 설치 위치는 `~/.codex/loaring-product-ops`다. 다른 위치가 필요하면 `LOARING_PRODUCT_OPS_DIR`를 지정한다.
+
+```bash
+LOARING_PRODUCT_OPS_DIR="$HOME/dev/loaring-product-ops" bash -c "$(curl -fsSL https://raw.githubusercontent.com/xonme888/project_plugin/develop/scripts/install.sh)"
+```
+
+직접 clone해서 설치:
+
 ```bash
 git clone https://github.com/xonme888/project_plugin.git
 cd project_plugin
